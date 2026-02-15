@@ -13,6 +13,8 @@ import { METRIC_DEFINITIONS, findMetricByName } from './processing/metric-defini
 import { fetchInsiderActivity } from './processing/insider-processor.js';
 import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
+import { getCompanySubmissions } from './core/sec-client.js';
+import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
 
 function validatePositiveInt(value: string | undefined, name: string): number | undefined {
   if (value === undefined) return undefined;
@@ -285,6 +287,76 @@ program
       } else {
         console.log('');
         console.log(renderInsiderTable(result));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('filings')
+  .alias('filing')
+  .description('List recent SEC filings for a company (e.g., filings AAPL)')
+  .argument('<company>', 'Company ticker or name')
+  .option('-f, --form <type>', 'Filter by form type (e.g., 10-K, 10-Q, 8-K, 4)')
+  .option('-n, --limit <n>', 'Number of filings to show', '20')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (companyArg: string, options: { form?: string; limit?: string; json?: boolean }) => {
+    try {
+      const limit = validatePositiveInt(options.limit || '20', '--limit')!;
+
+      const resolved = await resolveCompanyWithSuggestions(companyArg);
+      if (!resolved.company) {
+        if (resolved.suggestions.length > 0) {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of resolved.suggestions) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(`Could not find company: "${companyArg}"`));
+        }
+        process.exit(1);
+      }
+
+      const submissions = await getCompanySubmissions(resolved.company.cik);
+      const { recent } = submissions.filings;
+
+      const filings: Filing[] = [];
+      const paddedCik = resolved.company.cik.padStart(10, '0');
+
+      for (let i = 0; i < recent.form.length && filings.length < limit; i++) {
+        if (options.form && !recent.form[i].startsWith(options.form.toUpperCase())) continue;
+
+        const accessionNoDashes = recent.accessionNumber[i].replace(/-/g, '');
+        filings.push({
+          form_type: recent.form[i],
+          filing_date: recent.filingDate[i],
+          description: recent.primaryDocDescription[i] || recent.form[i],
+          accession_number: recent.accessionNumber[i],
+          edgar_url: `https://www.sec.gov/Archives/edgar/data/${paddedCik}/${accessionNoDashes}/${recent.primaryDocument[i]}`,
+        });
+      }
+
+      const result: FilingListResult = {
+        company: {
+          cik: resolved.company.cik,
+          ticker: resolved.company.ticker,
+          name: resolved.company.name,
+          fiscal_year_end_month: 0,
+        },
+        filings,
+        total_available: recent.form.length,
+      };
+
+      if (options.json) {
+        console.log(renderFilingJson(result));
+      } else {
+        console.log('');
+        console.log(renderFilingTable(result));
         console.log('');
       }
     } catch (err) {

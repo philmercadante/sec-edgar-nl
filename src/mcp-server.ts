@@ -208,6 +208,58 @@ server.tool(
   }
 );
 
+server.tool(
+  'list_company_filings',
+  'List recent SEC filings for a company with dates, form types, descriptions, and direct EDGAR links.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+    form_type: z.string().optional().describe('Filter by form type (e.g., 10-K, 10-Q, 8-K, 4)'),
+    limit: z.number().min(1).max(100).optional().default(20).describe('Max filings to return (default 20)'),
+  },
+  async ({ company, form_type, limit }) => {
+    const resolved = await resolveCompanyWithSuggestions(company);
+    if (!resolved.company) {
+      let errorText = `Could not find company: "${company}"`;
+      if (resolved.suggestions.length > 0) {
+        errorText = `Ambiguous company: "${company}"\n\nDid you mean:\n` +
+          resolved.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const { getCompanySubmissions } = await import('./core/sec-client.js');
+    const submissions = await getCompanySubmissions(resolved.company.cik);
+    const { recent } = submissions.filings;
+
+    const paddedCik = resolved.company.cik.padStart(10, '0');
+    const filings: Array<{
+      form_type: string; filing_date: string; description: string;
+      accession_number: string; edgar_url: string;
+    }> = [];
+
+    for (let i = 0; i < recent.form.length && filings.length < limit; i++) {
+      if (form_type && !recent.form[i].startsWith(form_type.toUpperCase())) continue;
+
+      const accessionNoDashes = recent.accessionNumber[i].replace(/-/g, '');
+      filings.push({
+        form_type: recent.form[i],
+        filing_date: recent.filingDate[i],
+        description: recent.primaryDocDescription[i] || recent.form[i],
+        accession_number: recent.accessionNumber[i],
+        edgar_url: `https://www.sec.gov/Archives/edgar/data/${paddedCik}/${accessionNoDashes}/${recent.primaryDocument[i]}`,
+      });
+    }
+
+    const output = {
+      company: { cik: resolved.company.cik, ticker: resolved.company.ticker, name: resolved.company.name },
+      filings,
+      total_available: recent.form.length,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
 // ── Resources ──────────────────────────────────────────────────────────
 
 server.resource(
