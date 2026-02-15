@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { formatCurrency, formatShareCount } from './table-renderer.js';
-import { padRight } from './format-utils.js';
+import { padRight, csvEscape } from './format-utils.js';
 import type { CompanyInfo, MetricDefinition } from '../core/types.js';
 
 export interface SummaryDataPoint {
@@ -117,6 +117,80 @@ export function renderSummaryJson(result: SummaryResult): string {
 }
 
 /**
+ * Render financial summary as CSV.
+ * For single-year: section, metric_id, display_name, value, yoy_change_pct
+ * For multi-year trend: section, metric_id, display_name, FY2020, FY2021, ...
+ */
+export function renderSummaryCsv(result: SummaryResult): string {
+  const lines: string[] = [];
+
+  // Detect if we have multi-year data
+  const hasYearValues = result.metrics.some(m => m.year_values && m.year_values.length > 0);
+
+  if (hasYearValues) {
+    // Collect all years
+    const allYears = new Set<number>();
+    for (const m of result.metrics) {
+      if (m.year_values) {
+        for (const yv of m.year_values) allYears.add(yv.fiscal_year);
+      }
+    }
+    const years = [...allYears].sort((a, b) => a - b);
+
+    // Header
+    const yearHeaders = years.map(y => `FY${y}`);
+    lines.push(['section', 'metric_id', 'display_name', ...yearHeaders].join(','));
+
+    // Metric rows
+    for (const m of result.metrics) {
+      const section = m.metric.statement_type === 'income_statement' ? 'Income Statement'
+        : m.metric.statement_type === 'cash_flow' ? 'Cash Flow'
+        : 'Balance Sheet';
+      const yearMap = new Map(m.year_values?.map(yv => [yv.fiscal_year, yv.value]) ?? []);
+      const values = years.map(y => {
+        const val = yearMap.get(y);
+        return val !== undefined ? String(val) : '';
+      });
+      lines.push([csvEscape(section), m.metric.id, csvEscape(m.metric.display_name), ...values].join(','));
+    }
+
+    // Derived ratios (single year only)
+    for (const d of result.derived) {
+      const values = years.map(y => y === result.fiscal_year ? String(d.value) : '');
+      lines.push(['Derived Ratio', d.name.toLowerCase().replace(/\s+/g, '_'), csvEscape(d.name), ...values].join(','));
+    }
+  } else {
+    // Single-year summary
+    lines.push('section,metric_id,display_name,value,yoy_change_pct');
+
+    for (const m of result.metrics) {
+      const section = m.metric.statement_type === 'income_statement' ? 'Income Statement'
+        : m.metric.statement_type === 'cash_flow' ? 'Cash Flow'
+        : 'Balance Sheet';
+      lines.push([
+        csvEscape(section),
+        m.metric.id,
+        csvEscape(m.metric.display_name),
+        String(m.value),
+        m.yoy_change !== undefined ? String(m.yoy_change) : '',
+      ].join(','));
+    }
+
+    for (const d of result.derived) {
+      lines.push([
+        'Derived Ratio',
+        d.name.toLowerCase().replace(/\s+/g, '_'),
+        csvEscape(d.name),
+        String(d.value),
+        '',
+      ].join(','));
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Render a multi-year trend view: metrics as rows, years as columns.
  */
 export function renderSummaryTrendTable(result: SummaryResult): string {
@@ -208,4 +282,3 @@ export function renderSummaryTrendTable(result: SummaryResult): string {
 
   return lines.join('\n');
 }
-

@@ -17,8 +17,9 @@ import { getCompanySubmissions, getCompanyFacts, searchFilings } from './core/se
 import { renderFilingTable, renderFilingJson, renderFilingCsv, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv, renderCompareRatioTable, renderCompareRatioJson, renderCompareRatioCsv } from './output/ratio-renderer.js';
-import { renderSummaryTable, renderSummaryJson, renderSummaryTrendTable } from './output/summary-renderer.js';
+import { renderSummaryTable, renderSummaryJson, renderSummaryCsv, renderSummaryTrendTable } from './output/summary-renderer.js';
 import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/screen-renderer.js';
+import { renderSearchCsv } from './output/search-renderer.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from './output/multi-metric-renderer.js';
 
 function formatWatchValue(value: number): string {
@@ -475,7 +476,8 @@ program
   .option('--year <yyyy>', 'Specific fiscal year (default: most recent)')
   .option('-y, --years <n>', 'Show multi-year trend (e.g., 5 for last 5 years)')
   .option('-j, --json', 'Output as JSON')
-  .action(async (companyArg: string, options: { year?: string; years?: string; json?: boolean }) => {
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, options: { year?: string; years?: string; json?: boolean; csv?: boolean }) => {
     try {
       const year = options.year ? validatePositiveInt(options.year, '--year') : undefined;
       const years = options.years ? validatePositiveInt(options.years, '--years') : undefined;
@@ -501,6 +503,8 @@ program
 
       if (options.json) {
         console.log(renderSummaryJson(result.result!));
+      } else if (options.csv) {
+        console.log(renderSummaryCsv(result.result!));
       } else if (years) {
         console.log('');
         console.log(renderSummaryTrendTable(result.result!));
@@ -822,7 +826,8 @@ program
   .option('--until <date>', 'End date (YYYY-MM-DD)')
   .option('-n, --limit <n>', 'Number of results', '20')
   .option('-j, --json', 'Output as JSON')
-  .action(async (queryParts: string[], options: { form?: string; since?: string; until?: string; limit?: string; json?: boolean }) => {
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (queryParts: string[], options: { form?: string; since?: string; until?: string; limit?: string; json?: boolean; csv?: boolean }) => {
     try {
       const limit = validatePositiveInt(options.limit || '20', '--limit')!;
       const forms = options.form ? options.form.split(',').map(f => f.trim()) : undefined;
@@ -849,6 +854,8 @@ program
             location: h.location,
           })),
         }, null, 2));
+      } else if (options.csv) {
+        console.log(renderSearchCsv(result));
       } else {
         const header = `Search: "${queryParts.join(' ')}" — ${result.total.toLocaleString()} results`;
         console.log('');

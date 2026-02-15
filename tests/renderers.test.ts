@@ -4,13 +4,14 @@ import { renderRatioJson, renderRatioCsv, renderRatioTable, renderCompareRatioTa
 import { renderFilingJson, renderFilingCsv, type FilingListResult } from '../src/output/filing-renderer.js';
 import { renderInsiderCsv } from '../src/output/insider-renderer.js';
 import type { InsiderActivityResult } from '../src/core/types.js';
-import { renderSummaryJson, renderSummaryTable, renderSummaryTrendTable, type SummaryResult } from '../src/output/summary-renderer.js';
+import { renderSummaryJson, renderSummaryTable, renderSummaryTrendTable, renderSummaryCsv, type SummaryResult } from '../src/output/summary-renderer.js';
 import { renderCsv, renderComparisonCsv } from '../src/output/csv-renderer.js';
 import { renderJson } from '../src/output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from '../src/output/comparison-renderer.js';
 import { renderScreenTable, renderScreenJson, renderScreenCsv } from '../src/output/screen-renderer.js';
 import { padRight, csvEscape } from '../src/output/format-utils.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from '../src/output/multi-metric-renderer.js';
+import { renderSearchCsv } from '../src/output/search-renderer.js';
 import type { RatioResult, ScreenResult, MultiMetricResult } from '../src/core/query-engine.js';
 import type { QueryResult, MetricDefinition } from '../src/core/types.js';
 
@@ -938,5 +939,109 @@ describe('renderMultiMetricCsv', () => {
     };
     const csv = renderMultiMetricCsv(withComma);
     expect(csv).toContain('"Revenue, Net"');
+  });
+});
+
+// ── Summary CSV renderer tests ──────────────────────────────────────
+
+describe('renderSummaryCsv', () => {
+  const mockSummary: SummaryResult = {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    fiscal_year: 2024,
+    metrics: [
+      { metric: mockMetric, value: 391e9, prior_year_value: 383e9, yoy_change: 2.1 },
+      {
+        metric: { ...mockMetric, id: 'net_income', display_name: 'Net Income' },
+        value: 94e9,
+        prior_year_value: 97e9,
+        yoy_change: -3.1,
+      },
+    ],
+    derived: [
+      { name: 'Net Margin', value: 24.0, format: 'percentage' },
+    ],
+  };
+
+  it('outputs single-year CSV with header and rows', () => {
+    const csv = renderSummaryCsv(mockSummary);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('section,metric_id,display_name,value,yoy_change_pct');
+    expect(lines).toHaveLength(4); // header + 2 metrics + 1 derived
+  });
+
+  it('includes metric values and YoY changes', () => {
+    const csv = renderSummaryCsv(mockSummary);
+    expect(csv).toContain('revenue,Revenue,391000000000,2.1');
+    expect(csv).toContain('net_income,Net Income,94000000000,-3.1');
+  });
+
+  it('includes derived ratios', () => {
+    const csv = renderSummaryCsv(mockSummary);
+    expect(csv).toContain('Derived Ratio,net_margin,Net Margin,24,');
+  });
+
+  it('outputs multi-year CSV when year_values present', () => {
+    const trendSummary: SummaryResult = {
+      ...mockSummary,
+      metrics: [
+        {
+          metric: mockMetric,
+          value: 391e9,
+          year_values: [
+            { fiscal_year: 2022, value: 365e9 },
+            { fiscal_year: 2023, value: 383e9 },
+            { fiscal_year: 2024, value: 391e9 },
+          ],
+        },
+      ],
+    };
+    const csv = renderSummaryCsv(trendSummary);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('section,metric_id,display_name,FY2022,FY2023,FY2024');
+    expect(lines[1]).toContain('revenue,Revenue,365000000000,383000000000,391000000000');
+  });
+
+  it('handles empty yoy_change', () => {
+    const noChange: SummaryResult = {
+      ...mockSummary,
+      metrics: [{ metric: mockMetric, value: 391e9 }],
+      derived: [],
+    };
+    const csv = renderSummaryCsv(noChange);
+    const lines = csv.split('\n');
+    expect(lines[1]).toBe('Income Statement,revenue,Revenue,391000000000,');
+  });
+});
+
+// ── Search CSV renderer tests ───────────────────────────────────────
+
+describe('renderSearchCsv', () => {
+  it('outputs CSV with header and hit rows', () => {
+    const csv = renderSearchCsv({
+      total: 2,
+      hits: [
+        { score: 1, display_name: 'Apple Inc.', cik: '320193', form_type: '10-K', filing_date: '2024-11-01', accession_number: 'accn1', period_ending: '2024-09-28', location: 'CA' },
+        { score: 0.9, display_name: 'Microsoft Corp', cik: '789019', form_type: '10-K', filing_date: '2024-10-28', accession_number: 'accn2', period_ending: '2024-06-30', location: 'WA' },
+      ],
+    });
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('company,cik,form_type,filing_date,period_ending,accession_number,location');
+    expect(lines).toHaveLength(3);
+  });
+
+  it('escapes company names with commas', () => {
+    const csv = renderSearchCsv({
+      total: 1,
+      hits: [
+        { score: 1, display_name: 'Foo, Bar Inc.', cik: '123', form_type: '8-K', filing_date: '2024-01-01', accession_number: 'accn', period_ending: '2024-01-01', location: 'NY' },
+      ],
+    });
+    expect(csv).toContain('"Foo, Bar Inc."');
+  });
+
+  it('handles empty results', () => {
+    const csv = renderSearchCsv({ total: 0, hits: [] });
+    const lines = csv.split('\n');
+    expect(lines).toHaveLength(1); // Just header
   });
 });

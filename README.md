@@ -314,6 +314,7 @@ sec-edgar-nl/
       insider-renderer.ts    # Insider trading output
       screen-renderer.ts     # Company screening output
       multi-metric-renderer.ts # Multi-metric comparison output
+      search-renderer.ts     # Filing search CSV output
 ```
 
 ### Key Design Decisions
@@ -328,7 +329,7 @@ sec-edgar-nl/
 ## Testing
 
 ```bash
-npm test           # Run all tests (213 tests)
+npm test           # Run all tests (221 tests)
 npm run test:watch # Watch mode
 ```
 
