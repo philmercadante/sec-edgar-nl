@@ -3,17 +3,12 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { resolveCompanyWithSuggestions } from './core/resolver.js';
-import { fetchMetricData, fetchQuarterlyData } from './processing/xbrl-processor.js';
-import { calculateGrowth } from './processing/calculations.js';
-import { buildProvenance } from './analysis/provenance.js';
+import { executeQueryCore, executeCompareCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
 import { closeCache, clearCache, getCacheStats } from './core/cache.js';
 import { METRIC_DEFINITIONS, findMetricByName } from './processing/metric-definitions.js';
-import { NotFoundError, RateLimitError, SecApiError, DataParseError } from './core/errors.js';
-import type { QueryResult, CompanyInfo } from './core/types.js';
 
 async function executeQuery(queryStr: string, options: { json?: boolean; years?: string }): Promise<void> {
   try {
@@ -39,86 +34,63 @@ async function executeQuery(queryStr: string, options: { json?: boolean; years?:
       process.exit(1);
     }
 
-    // Resolve company with suggestions
-    const resolved = await resolveCompanyWithSuggestions(parsed.company);
-    if (!resolved.company) {
-      if (resolved.suggestions.length > 0) {
-        console.error(chalk.red(`Ambiguous company: "${parsed.company}". Did you mean:`));
-        for (const s of resolved.suggestions) {
-          console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
-        }
-      } else {
-        console.error(chalk.red(`Could not find company: "${parsed.company}"`));
-        console.error('Try using a ticker symbol (e.g., AAPL) or exact company name.');
+    const result = await executeQueryCore({
+      company: parsed.company,
+      metric: parsed.metric.id,
+      years: parsed.years,
+      periodType: parsed.periodType,
+      quarters: parsed.quarters,
+    });
+
+    if (!result.success) {
+      const err = result.error!;
+      switch (err.type) {
+        case 'company_ambiguous':
+          console.error(chalk.red(`Ambiguous company: "${parsed.company}". Did you mean:`));
+          for (const s of err.suggestions!) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+          break;
+        case 'company_not_found':
+          console.error(chalk.red(err.message));
+          break;
+        case 'no_data':
+          console.error(chalk.red(err.message));
+          if (err.conceptsTried) {
+            console.error(chalk.dim('Tried XBRL concepts:'));
+            for (const c of err.conceptsTried) {
+              const status = c.found
+                ? (c.annual_count > 0 ? chalk.yellow(`${c.annual_count} facts, max FY${c.max_fiscal_year}`) : chalk.dim('found but no data'))
+                : chalk.red('not found');
+              console.error(chalk.dim(`  ${c.taxonomy}:${c.concept} — ${status}`));
+            }
+          }
+          break;
+        default:
+          console.error(chalk.red(err.message));
       }
       process.exit(1);
     }
 
-    const company = resolved.company;
-
-    // Fetch data (annual or quarterly)
-    const { dataPoints, conceptUsed, conceptSelection } = parsed.periodType === 'quarterly'
-      ? await fetchQuarterlyData(company, parsed.metric, parsed.quarters)
-      : await fetchMetricData(company, parsed.metric, parsed.years);
-
-    if (dataPoints.length === 0) {
-      console.error(chalk.red(`No data found for ${company.name} — ${parsed.metric.display_name}`));
-      console.error(chalk.dim(`Tried XBRL concepts:`));
-      for (const c of conceptSelection.concepts_tried) {
-        const status = c.found
-          ? (c.annual_count > 0 ? chalk.yellow(`${c.annual_count} annual facts, max FY${c.max_fiscal_year}`) : chalk.dim('found but no annual data'))
-          : chalk.red('not found');
-        console.error(chalk.dim(`  ${c.taxonomy}:${c.concept} — ${status}`));
-      }
-      process.exit(1);
-    }
+    const r = result.result!;
 
     // Note if fewer years than requested
-    if (dataPoints.length < parsed.years) {
+    if (r.data_points.length < parsed.years && parsed.periodType === 'annual') {
       console.error(chalk.yellow(
-        `Note: Only ${dataPoints.length} years of data available (requested ${parsed.years})`
+        `Note: Only ${r.data_points.length} years of data available (requested ${parsed.years})`
       ));
     }
 
-    // Build result
-    const companyInfo: CompanyInfo = {
-      cik: company.cik,
-      ticker: company.ticker,
-      name: company.name,
-      fiscal_year_end_month: 0,
-    };
-
-    const calculations = calculateGrowth(dataPoints);
-    const provenance = buildProvenance(dataPoints, parsed.metric, conceptUsed, conceptSelection);
-
-    const result: QueryResult = {
-      company: companyInfo,
-      metric: parsed.metric,
-      data_points: dataPoints,
-      calculations,
-      provenance,
-    };
-
     // Render
     if (options.json) {
-      console.log(renderJson(result));
+      console.log(renderJson(r));
     } else {
       console.log('');
-      console.log(renderTable(result));
+      console.log(renderTable(r));
       console.log('');
     }
   } catch (err) {
-    if (err instanceof NotFoundError) {
-      console.error(chalk.red(`Company not found in SEC EDGAR. It may not file with the SEC.`));
-    } else if (err instanceof RateLimitError) {
-      console.error(chalk.red(err.message));
-    } else if (err instanceof SecApiError) {
-      console.error(chalk.red(`SEC API error (${err.statusCode}): ${err.message}`));
-    } else if (err instanceof DataParseError) {
-      console.error(chalk.red(err.message));
-    } else {
-      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
-    }
+    console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   } finally {
     closeCache();
@@ -130,7 +102,7 @@ const program = new Command();
 program
   .name('sec-edgar-nl')
   .description('Trustworthy financial answers from SEC EDGAR filings with full provenance')
-  .version('0.1.0');
+  .version('0.2.0');
 
 program
   .command('query')
@@ -192,12 +164,10 @@ program
       const years = parseInt(options.years || '5', 10);
 
       // Separate tickers from metric name
-      // Strategy: try each arg as a ticker, remaining words form the metric
       const tickers: string[] = [];
       const metricWords: string[] = [];
 
       for (const arg of args) {
-        // All-caps 1-5 chars = likely ticker
         if (/^[A-Z]{1,5}(-[A-Z])?$/.test(arg.toUpperCase()) && arg.length <= 6) {
           tickers.push(arg.toUpperCase());
         } else {
@@ -222,46 +192,14 @@ program
         process.exit(1);
       }
 
-      // Resolve all companies in parallel
-      const resolutions = await Promise.all(
-        tickers.map(t => resolveCompanyWithSuggestions(t))
-      );
+      const { results, errors } = await executeCompareCore({
+        tickers,
+        metric: metric.id,
+        years,
+      });
 
-      const results: QueryResult[] = [];
-
-      for (let i = 0; i < tickers.length; i++) {
-        const resolved = resolutions[i];
-        if (!resolved.company) {
-          console.error(chalk.red(`Could not resolve: ${tickers[i]}`));
-          continue;
-        }
-
-        const company = resolved.company;
-        const { dataPoints, conceptUsed, conceptSelection } = await fetchMetricData(
-          company,
-          metric,
-          years
-        );
-
-        if (dataPoints.length === 0) {
-          console.error(chalk.yellow(`No data for ${company.ticker} — ${metric.display_name}`));
-          continue;
-        }
-
-        const companyInfo: CompanyInfo = {
-          cik: company.cik,
-          ticker: company.ticker,
-          name: company.name,
-          fiscal_year_end_month: 0,
-        };
-
-        results.push({
-          company: companyInfo,
-          metric,
-          data_points: dataPoints,
-          calculations: calculateGrowth(dataPoints),
-          provenance: buildProvenance(dataPoints, metric, conceptUsed, conceptSelection),
-        });
+      for (const err of errors) {
+        console.error(chalk.yellow(`${err.ticker}: ${err.message}`));
       }
 
       if (results.length === 0) {
