@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
@@ -18,6 +18,7 @@ import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
 import { renderSummaryTable, renderSummaryJson, renderSummaryTrendTable } from './output/summary-renderer.js';
+import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/screen-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -587,6 +588,84 @@ program
           console.log(`  ${chalk.cyan(c.concept)}`);
           console.log(`    ${chalk.dim(c.label)} | ${c.taxonomy} | ${c.units.join(', ')} | ${c.fact_count} facts | ${yearRange}`);
         }
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('screen')
+  .description('Screen companies by a financial metric using SEC EDGAR Frames API')
+  .argument('<metric>', 'Financial metric (e.g., revenue, net_income, total_assets)')
+  .option('-y, --year <yyyy>', 'Calendar year (default: previous year)')
+  .option('--min <value>', 'Minimum value filter (e.g., 1000000000 or 1B)')
+  .option('--max <value>', 'Maximum value filter')
+  .option('-s, --sort <order>', 'Sort order: desc, asc, name', 'desc')
+  .option('-n, --limit <n>', 'Number of companies to show', '50')
+  .option('-j, --json', 'Output as JSON')
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (metricArg: string, options: { year?: string; min?: string; max?: string; sort?: string; limit?: string; json?: boolean; csv?: boolean }) => {
+    try {
+      const year = options.year ? validatePositiveInt(options.year, '--year') : undefined;
+      const limit = validatePositiveInt(options.limit || '50', '--limit')!;
+
+      // Parse human-readable values (e.g., "1B", "500M", "10K")
+      function parseValue(str: string): number {
+        const match = str.match(/^([\d.]+)\s*([TGBMK]?)$/i);
+        if (!match) return parseFloat(str);
+        const num = parseFloat(match[1]);
+        const suffix = match[2].toUpperCase();
+        switch (suffix) {
+          case 'T': return num * 1e12;
+          case 'G': case 'B': return num * 1e9;
+          case 'M': return num * 1e6;
+          case 'K': return num * 1e3;
+          default: return num;
+        }
+      }
+
+      const minValue = options.min ? parseValue(options.min) : undefined;
+      const maxValue = options.max ? parseValue(options.max) : undefined;
+
+      const sortBy = options.sort === 'asc' ? 'value_asc'
+        : options.sort === 'name' ? 'name'
+        : 'value_desc';
+
+      const result = await executeScreenCore({
+        metric: metricArg,
+        year,
+        minValue,
+        maxValue,
+        sortBy,
+        limit,
+      });
+
+      if (!result.success) {
+        const err = result.error!;
+        if (err.type === 'metric_not_found') {
+          console.error(chalk.red(err.message));
+          console.error('\nSupported metrics:');
+          for (const m of METRIC_DEFINITIONS) {
+            console.error(`  ${chalk.cyan(m.id.padEnd(22))} ${m.display_name}`);
+          }
+        } else {
+          console.error(chalk.red(err.message));
+        }
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(renderScreenJson(result.result!));
+      } else if (options.csv) {
+        console.log(renderScreenCsv(result.result!));
+      } else {
+        console.log('');
+        console.log(renderScreenTable(result.result!));
         console.log('');
       }
     } catch (err) {

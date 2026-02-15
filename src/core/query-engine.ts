@@ -7,6 +7,7 @@
  */
 
 import { resolveCompanyWithSuggestions, type ResolveResult } from './resolver.js';
+import { getFrameData, type FrameDataPoint } from './sec-client.js';
 import { fetchMetricData, fetchQuarterlyData } from '../processing/xbrl-processor.js';
 import { calculateGrowth } from '../processing/calculations.js';
 import { buildProvenance } from '../analysis/provenance.js';
@@ -555,6 +556,150 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
       fiscal_year: fiscalYear,
       metrics,
       derived,
+    },
+  };
+}
+
+// ── Screen Execution ──────────────────────────────────────────────────
+
+export interface ScreenParams {
+  metric: string;
+  year?: number;
+  minValue?: number;
+  maxValue?: number;
+  sortBy?: 'value_desc' | 'value_asc' | 'name';
+  limit?: number;
+}
+
+export interface ScreenCompany {
+  cik: number;
+  entity_name: string;
+  location: string;
+  value: number;
+  period_start: string;
+  period_end: string;
+  accession_number: string;
+}
+
+export interface ScreenResult {
+  metric: MetricDefinition;
+  period: string;
+  total_companies: number;
+  filtered_companies: number;
+  companies: ScreenCompany[];
+}
+
+export interface ScreenEngineResult {
+  success: boolean;
+  result?: ScreenResult;
+  error?: {
+    type: 'metric_not_found' | 'no_data' | 'api_error';
+    message: string;
+    availableMetrics?: Array<{ id: string; display_name: string }>;
+  };
+}
+
+/**
+ * Screen companies using the SEC EDGAR Frames API.
+ * Returns all companies that reported a specific metric in a given year.
+ */
+export async function executeScreenCore(params: ScreenParams): Promise<ScreenEngineResult> {
+  const {
+    metric: metricQuery,
+    year = new Date().getFullYear() - 1,
+    minValue,
+    maxValue,
+    sortBy = 'value_desc',
+    limit = 50,
+  } = params;
+
+  // Resolve metric
+  const metric = getMetricDefinition(metricQuery) ?? findMetricByName(metricQuery);
+  if (!metric) {
+    return {
+      success: false,
+      error: {
+        type: 'metric_not_found',
+        message: `Could not identify metric: "${metricQuery}"`,
+        availableMetrics: METRIC_DEFINITIONS.map(m => ({ id: m.id, display_name: m.display_name })),
+      },
+    };
+  }
+
+  // Determine unit for frames API
+  const unit = metric.unit_type === 'currency' ? 'USD'
+    : metric.unit_type === 'shares' ? 'shares'
+    : 'USD/shares';
+
+  // Try each XBRL concept in priority order
+  const period = `CY${year}`;
+  let frameData: Awaited<ReturnType<typeof getFrameData>> | null = null;
+  let usedConcept = '';
+
+  for (const concept of metric.xbrl_concepts.sort((a, b) => a.priority - b.priority)) {
+    try {
+      frameData = await getFrameData(concept.taxonomy, concept.concept, unit, period);
+      usedConcept = `${concept.taxonomy}:${concept.concept}`;
+      if (frameData.data.length > 0) break;
+    } catch {
+      continue;
+    }
+  }
+
+  if (!frameData || frameData.data.length === 0) {
+    return {
+      success: false,
+      error: {
+        type: 'no_data',
+        message: `No data found for ${metric.display_name} in ${period}. Try a different year.`,
+      },
+    };
+  }
+
+  // Apply filters
+  let companies: ScreenCompany[] = frameData.data.map(dp => ({
+    cik: dp.cik,
+    entity_name: dp.entityName,
+    location: dp.loc,
+    value: dp.val,
+    period_start: dp.start,
+    period_end: dp.end,
+    accession_number: dp.accn,
+  }));
+
+  const totalCompanies = companies.length;
+
+  if (minValue !== undefined) {
+    companies = companies.filter(c => c.value >= minValue);
+  }
+  if (maxValue !== undefined) {
+    companies = companies.filter(c => c.value <= maxValue);
+  }
+
+  // Sort
+  switch (sortBy) {
+    case 'value_desc':
+      companies.sort((a, b) => b.value - a.value);
+      break;
+    case 'value_asc':
+      companies.sort((a, b) => a.value - b.value);
+      break;
+    case 'name':
+      companies.sort((a, b) => a.entity_name.localeCompare(b.entity_name));
+      break;
+  }
+
+  const filteredCount = companies.length;
+  companies = companies.slice(0, limit);
+
+  return {
+    success: true,
+    result: {
+      metric,
+      period: `CY${year}`,
+      total_companies: totalCompanies,
+      filtered_companies: filteredCount,
+      companies,
     },
   };
 }

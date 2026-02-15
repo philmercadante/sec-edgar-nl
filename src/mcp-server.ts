@@ -24,7 +24,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore } from './core/query-engine.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
 import { RATIO_DEFINITIONS } from './processing/ratio-definitions.js';
 import { getCacheStats } from './core/cache.js';
@@ -403,6 +403,50 @@ server.tool(
       company: { cik: resolved.company.cik, ticker: resolved.company.ticker, name: resolved.company.name },
       total_concepts: concepts.length,
       concepts: shown,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
+  'screen_companies',
+  'Screen all public companies by a financial metric using SEC EDGAR Frames API. Returns companies ranked by the metric value for a given calendar year. Supports filtering by min/max value.',
+  {
+    metric: z.enum(METRIC_IDS).describe('Financial metric to screen by'),
+    year: z.number().min(2009).max(2030).optional().describe('Calendar year (default: previous year)'),
+    min_value: z.number().optional().describe('Minimum metric value filter'),
+    max_value: z.number().optional().describe('Maximum metric value filter'),
+    sort: z.enum(['value_desc', 'value_asc', 'name']).optional().default('value_desc').describe('Sort order'),
+    limit: z.number().min(1).max(500).optional().default(50).describe('Max companies to return'),
+  },
+  async ({ metric, year, min_value, max_value, sort, limit }) => {
+    const result = await executeScreenCore({
+      metric,
+      year,
+      minValue: min_value,
+      maxValue: max_value,
+      sortBy: sort,
+      limit,
+    });
+
+    if (!result.success) {
+      return { content: [{ type: 'text', text: result.error!.message }], isError: true };
+    }
+
+    const r = result.result!;
+    const output = {
+      metric: { id: r.metric.id, display_name: r.metric.display_name },
+      period: r.period,
+      total_companies: r.total_companies,
+      filtered_companies: r.filtered_companies,
+      companies: r.companies.map(c => ({
+        cik: c.cik,
+        entity_name: c.entity_name,
+        location: c.location,
+        value: c.value,
+        period_end: c.period_end,
+      })),
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };

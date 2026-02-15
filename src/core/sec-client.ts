@@ -190,6 +190,51 @@ export async function getCompanySubmissions(cik: string): Promise<CompanySubmiss
   }
 }
 
+/** Shape of the SEC XBRL Frames API response */
+export interface FrameData {
+  taxonomy: string;
+  tag: string;
+  ccp: string; // Calendar/Company Period (e.g., CY2024)
+  uom: string; // Unit of measure (e.g., USD)
+  label: string;
+  description: string;
+  pts: number; // Number of data points
+  data: FrameDataPoint[];
+}
+
+export interface FrameDataPoint {
+  accn: string;
+  cik: number;
+  entityName: string;
+  loc: string; // State/country code
+  start: string;
+  end: string;
+  val: number;
+}
+
+/**
+ * Fetch cross-company XBRL data from the Frames API.
+ * Returns all companies that reported a specific concept in a given period.
+ */
+export async function getFrameData(
+  taxonomy: string,
+  concept: string,
+  unit: string,
+  period: string
+): Promise<FrameData> {
+  const url = `${BASE_URL}/api/xbrl/frames/${taxonomy}/${concept}/${unit}/${period}.json`;
+  const body = await fetchWithRateLimit(url, 24); // Cache for 1 day
+
+  try {
+    return JSON.parse(body) as FrameData;
+  } catch {
+    throw new DataParseError(
+      `Failed to parse frames data for ${taxonomy}/${concept}/${period}.`,
+      url
+    );
+  }
+}
+
 /**
  * Fetch a specific filing document (XML, HTML, etc.)
  * Used for Form 4 XML documents and 13F information tables.
