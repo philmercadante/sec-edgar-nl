@@ -82,6 +82,55 @@ export const RATIO_DEFINITIONS: RatioDefinition[] = [
     denominator: 'operating_cash_flow',
     format: 'percentage',
   },
+  // ── Phase 3 ratios ──────────────────────────────────────────────────
+  {
+    id: 'current_ratio',
+    display_name: 'Current Ratio',
+    description: 'Current assets divided by current liabilities',
+    numerator: 'current_assets',
+    denominator: 'current_liabilities',
+    format: 'multiple',
+  },
+  {
+    id: 'return_on_assets',
+    display_name: 'Return on Assets',
+    description: 'Net income divided by total assets',
+    numerator: 'net_income',
+    denominator: 'total_assets',
+    format: 'percentage',
+  },
+  {
+    id: 'return_on_equity',
+    display_name: 'Return on Equity',
+    description: 'Net income divided by shareholders equity',
+    numerator: 'net_income',
+    denominator: 'total_equity',
+    format: 'percentage',
+  },
+  {
+    id: 'asset_turnover',
+    display_name: 'Asset Turnover',
+    description: 'Revenue divided by total assets',
+    numerator: 'revenue',
+    denominator: 'total_assets',
+    format: 'multiple',
+  },
+  {
+    id: 'interest_coverage',
+    display_name: 'Interest Coverage',
+    description: 'Operating income divided by interest expense',
+    numerator: 'operating_income',
+    denominator: 'interest_expense',
+    format: 'multiple',
+  },
+  {
+    id: 'effective_tax_rate',
+    display_name: 'Effective Tax Rate',
+    description: 'Income tax expense divided by pre-tax income (operating income)',
+    numerator: 'income_tax',
+    denominator: 'operating_income',
+    format: 'percentage',
+  },
 ];
 
 export function getRatioDefinition(id: string): RatioDefinition | undefined {
@@ -124,6 +173,18 @@ export function findRatioByName(name: string): RatioDefinition | undefined {
     'capex ratio': 'capex_to_ocf',
     'capex to ocf': 'capex_to_ocf',
     'capital intensity': 'capex_to_ocf',
+    // Phase 3 ratios
+    'current ratio': 'current_ratio',
+    'liquidity ratio': 'current_ratio',
+    'return on assets': 'return_on_assets',
+    'roa': 'return_on_assets',
+    'return on equity': 'return_on_equity',
+    'roe': 'return_on_equity',
+    'asset turnover': 'asset_turnover',
+    'interest coverage': 'interest_coverage',
+    'times interest earned': 'interest_coverage',
+    'effective tax rate': 'effective_tax_rate',
+    'tax rate': 'effective_tax_rate',
   };
 
   const sortedKeywords = Object.entries(keywords).sort((a, b) => b[0].length - a[0].length);

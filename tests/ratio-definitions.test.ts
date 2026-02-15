@@ -7,8 +7,8 @@ import {
 import { getMetricDefinition } from '../src/processing/metric-definitions.js';
 
 describe('RATIO_DEFINITIONS', () => {
-  it('has 8 ratios', () => {
-    expect(RATIO_DEFINITIONS).toHaveLength(8);
+  it('has 14 ratios', () => {
+    expect(RATIO_DEFINITIONS).toHaveLength(14);
   });
 
   it('all ratios have unique IDs', () => {
@@ -57,5 +57,30 @@ describe('findRatioByName', () => {
 
   it('returns undefined for unrecognized name', () => {
     expect(findRatioByName('price to earnings')).toBeUndefined();
+  });
+
+  // Phase 3 ratios
+  it('finds current ratio by "current ratio"', () => {
+    expect(findRatioByName('current ratio')?.id).toBe('current_ratio');
+  });
+
+  it('finds ROA by "roa"', () => {
+    expect(findRatioByName('roa')?.id).toBe('return_on_assets');
+  });
+
+  it('finds ROE by "roe"', () => {
+    expect(findRatioByName('roe')?.id).toBe('return_on_equity');
+  });
+
+  it('finds interest coverage by "times interest earned"', () => {
+    expect(findRatioByName('times interest earned')?.id).toBe('interest_coverage');
+  });
+
+  it('finds effective tax rate by "tax rate"', () => {
+    expect(findRatioByName('tax rate')?.id).toBe('effective_tax_rate');
+  });
+
+  it('finds asset turnover by "asset turnover"', () => {
+    expect(findRatioByName('asset turnover')?.id).toBe('asset_turnover');
   });
 });

@@ -6,8 +6,8 @@ import {
 } from '../src/processing/metric-definitions.js';
 
 describe('METRIC_DEFINITIONS', () => {
-  it('has 13 metrics', () => {
-    expect(METRIC_DEFINITIONS).toHaveLength(13);
+  it('has 23 metrics', () => {
+    expect(METRIC_DEFINITIONS).toHaveLength(23);
   });
 
   it('all metrics have unique IDs', () => {
@@ -112,5 +112,43 @@ describe('findMetricByName', () => {
 
   it('finds shares by "common shares"', () => {
     expect(findMetricByName('common shares')?.id).toBe('shares_outstanding');
+  });
+
+  // Phase 3 metrics
+  it('finds cost of revenue by "cogs"', () => {
+    expect(findMetricByName('cogs')?.id).toBe('cost_of_revenue');
+  });
+
+  it('finds SG&A by "sg&a"', () => {
+    expect(findMetricByName('sg&a')?.id).toBe('sga_expense');
+  });
+
+  it('finds interest expense by "interest expense"', () => {
+    expect(findMetricByName('interest expense')?.id).toBe('interest_expense');
+  });
+
+  it('finds income tax by "tax expense"', () => {
+    expect(findMetricByName('tax expense')?.id).toBe('income_tax');
+  });
+
+  it('finds dividends by "dps"', () => {
+    expect(findMetricByName('dps')?.id).toBe('dividends_per_share');
+  });
+
+  it('finds cash by "cash on hand"', () => {
+    expect(findMetricByName('cash on hand')?.id).toBe('cash_and_equivalents');
+  });
+
+  it('finds current ratio components', () => {
+    expect(findMetricByName('current assets')?.id).toBe('current_assets');
+    expect(findMetricByName('current liabilities')?.id).toBe('current_liabilities');
+  });
+
+  it('finds goodwill', () => {
+    expect(findMetricByName('goodwill')?.id).toBe('goodwill');
+  });
+
+  it('finds total liabilities', () => {
+    expect(findMetricByName('total liabilities')?.id).toBe('total_liabilities');
   });
 });
