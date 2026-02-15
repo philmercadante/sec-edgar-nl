@@ -23,7 +23,7 @@ sec-edgar-nl query "MSFT net income"
 
 ## Features
 
-### Financial Metrics (13 metrics)
+### Financial Metrics (23 metrics)
 
 Query any of these metrics for any SEC-reporting company:
 
@@ -35,6 +35,11 @@ Query any of these metrics for any SEC-reporting company:
 | Gross Profit | `gross_profit` | Income Statement |
 | R&D Expense | `rd_expense` | Income Statement |
 | EPS (Diluted) | `eps` | Income Statement |
+| Cost of Revenue | `cost_of_revenue` | Income Statement |
+| SG&A Expense | `sga_expense` | Income Statement |
+| Interest Expense | `interest_expense` | Income Statement |
+| Income Tax Expense | `income_tax` | Income Statement |
+| Dividends Per Share | `dividends_per_share` | Income Statement |
 | Operating Cash Flow | `operating_cash_flow` | Cash Flow |
 | Capital Expenditures | `capex` | Cash Flow |
 | Stock-Based Compensation | `sbc` | Cash Flow |
@@ -42,8 +47,13 @@ Query any of these metrics for any SEC-reporting company:
 | Total Assets | `total_assets` | Balance Sheet |
 | Shareholders' Equity | `total_equity` | Balance Sheet |
 | Shares Outstanding | `shares_outstanding` | Balance Sheet |
+| Cash & Equivalents | `cash_and_equivalents` | Balance Sheet |
+| Current Assets | `current_assets` | Balance Sheet |
+| Current Liabilities | `current_liabilities` | Balance Sheet |
+| Goodwill | `goodwill` | Balance Sheet |
+| Total Liabilities | `total_liabilities` | Balance Sheet |
 
-### Derived Financial Ratios (8 ratios)
+### Derived Financial Ratios (14 ratios)
 
 Computed from the base metrics — no additional API calls:
 
@@ -57,14 +67,23 @@ Computed from the base metrics — no additional API calls:
 | Debt-to-Equity | `debt_to_equity` | Total Debt / Equity |
 | Free Cash Flow | `free_cash_flow` | OCF - Capex |
 | Capex / OCF | `capex_to_ocf` | Capex / OCF |
+| Current Ratio | `current_ratio` | Current Assets / Current Liabilities |
+| Return on Assets | `return_on_assets` | Net Income / Total Assets |
+| Return on Equity | `return_on_equity` | Net Income / Equity |
+| Asset Turnover | `asset_turnover` | Revenue / Total Assets |
+| Interest Coverage | `interest_coverage` | Operating Income / Interest Expense |
+| Effective Tax Rate | `effective_tax_rate` | Income Tax / Operating Income |
 
 ### Other Features
 
 - **Natural language queries** — "Apple's R&D spending over the last 5 years"
+- **Company screening** — Find all companies with revenue > $100B using Frames API
 - **Multi-company comparison** — Compare revenue across AAPL, MSFT, GOOGL
+- **Company profile** — SIC code, industry, fiscal year end, filing history
 - **Insider trading** — Form 4 buy/sell activity with bullish/bearish signals
 - **Filing timeline** — List recent SEC filings with direct EDGAR links
-- **Financial summary** — All 13 metrics + derived ratios in one command
+- **Financial summary** — All metrics + derived ratios in one command
+- **Multi-year trend** — See all metrics across 5+ years side-by-side
 - **Period-specific queries** — "AAPL revenue FY2023" or "in 2023"
 - **Full history export** — `--all` flag for complete available history
 - **Annual and quarterly data** — Switch with `quarterly` keyword or `-q` flag
@@ -97,6 +116,22 @@ sec-edgar-nl query "AAPL revenue" --json
 sec-edgar-nl query "AAPL revenue" --csv
 ```
 
+### Screen companies
+
+```bash
+# Top companies by revenue
+sec-edgar-nl screen revenue --year 2024 --limit 20
+
+# Large-cap companies by total assets
+sec-edgar-nl screen total_assets --min 100B
+
+# Filter by range with human-readable values
+sec-edgar-nl screen net_income --year 2024 --min 1B --max 10B --csv
+
+# Sort by name instead of value
+sec-edgar-nl screen revenue --sort name --json
+```
+
 ### Compare companies
 
 ```bash
@@ -111,6 +146,7 @@ sec-edgar-nl compare NVDA AMD INTC rd_expense --years 10
 sec-edgar-nl ratio AAPL net_margin
 sec-edgar-nl ratio MSFT gross_margin --years 10
 sec-edgar-nl ratio TSLA free_cash_flow --json
+sec-edgar-nl ratio AAPL return_on_equity
 sec-edgar-nl ratios  # List all available ratios
 ```
 
@@ -119,6 +155,14 @@ sec-edgar-nl ratios  # List all available ratios
 ```bash
 sec-edgar-nl summary AAPL
 sec-edgar-nl summary MSFT --year 2023 --json
+sec-edgar-nl summary AAPL --years 5     # Multi-year trend view
+```
+
+### Company profile
+
+```bash
+sec-edgar-nl info AAPL
+sec-edgar-nl info MSFT --json
 ```
 
 ### Insider trading
@@ -189,8 +233,10 @@ Add to your `claude_desktop_config.json`:
 |------|-------------|
 | `query_financial_metric` | Fetch a metric for a company |
 | `compare_companies` | Compare a metric across companies |
+| `screen_companies` | Screen all companies by a metric (Frames API) |
 | `query_financial_ratio` | Compute a derived ratio |
 | `company_financial_summary` | All metrics for one company |
+| `company_info` | Company profile (SIC, industry, filing history) |
 | `query_insider_trading` | Insider buy/sell activity |
 | `list_company_filings` | Recent SEC filing list |
 | `explore_xbrl_concepts` | Discover available XBRL data |
@@ -214,15 +260,15 @@ sec-edgar-nl/
     index.ts                 # CLI entry point (Commander.js)
     mcp-server.ts            # MCP server entry point
     core/
-      sec-client.ts          # SEC EDGAR API client with rate limiting
+      sec-client.ts          # SEC EDGAR API client (CompanyFacts, Submissions, Frames)
       resolver.ts            # Company name/ticker -> CIK resolution
-      query-engine.ts        # Core query, compare, ratio, summary execution
-      cache.ts               # SQLite HTTP-level cache
+      query-engine.ts        # Core query, compare, ratio, summary, screen execution
+      cache.ts               # SQLite HTTP-level cache with watchlist
       types.ts               # TypeScript data model
     processing/
       xbrl-processor.ts      # XBRL fact extraction and deduplication
-      metric-definitions.ts  # 13 metric definitions with XBRL concept chains
-      ratio-definitions.ts   # 8 derived ratio definitions
+      metric-definitions.ts  # 23 metric definitions with XBRL concept chains
+      ratio-definitions.ts   # 14 derived ratio definitions
       calculations.ts        # YoY growth, CAGR calculations
       insider-processor.ts   # Form 4 XML parser
     analysis/
@@ -234,9 +280,10 @@ sec-edgar-nl/
       csv-renderer.ts        # CSV output
       comparison-renderer.ts # Multi-company comparison tables
       ratio-renderer.ts      # Ratio table/JSON/CSV output
-      summary-renderer.ts    # Financial summary output
+      summary-renderer.ts    # Financial summary + trend output
       filing-renderer.ts     # Filing timeline output
       insider-renderer.ts    # Insider trading output
+      screen-renderer.ts     # Company screening output
 ```
 
 ### Key Design Decisions
@@ -244,13 +291,14 @@ sec-edgar-nl/
 - **XBRL concept fallback chains** — Each metric tries multiple XBRL concepts in priority order, since companies use different tags
 - **"Most recently filed wins" deduplication** — When the same period appears in multiple filings, the latest filing's value is used (handles restatements)
 - **Fiscal year from period end date** — Works correctly for any fiscal year-end (Dec, Sep, Jan, etc.)
+- **Frames API for screening** — Cross-company queries via `data.sec.gov/api/xbrl/frames/` for O(1) lookups across all filers
 - **Rate limiting** — Token bucket at 10 req/s to respect SEC's Fair Access policy
-- **HTTP-level caching** — CompanyFacts cached 7 days, submissions 1 day, filings 30 days
+- **HTTP-level caching** — CompanyFacts cached 7 days, submissions 1 day, filings 30 days, frames 1 day
 
 ## Testing
 
 ```bash
-npm test           # Run all tests (113 tests)
+npm test           # Run all tests (131 tests)
 npm run test:watch # Watch mode
 ```
 

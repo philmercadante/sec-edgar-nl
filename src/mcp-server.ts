@@ -35,7 +35,7 @@ import { TRANSACTION_CODE_LABELS } from './processing/insider-processor.js';
 const METRIC_IDS = METRIC_DEFINITIONS.map(m => m.id) as [string, ...string[]];
 
 const server = new McpServer(
-  { name: 'sec-edgar-nl', version: '0.3.0' },
+  { name: 'sec-edgar-nl', version: '0.4.0' },
   { capabilities: { tools: {}, resources: {}, prompts: {} } }
 );
 
