@@ -11,7 +11,8 @@ import { fetchMetricData, fetchQuarterlyData } from '../processing/xbrl-processo
 import { calculateGrowth } from '../processing/calculations.js';
 import { buildProvenance } from '../analysis/provenance.js';
 import { METRIC_DEFINITIONS, findMetricByName, getMetricDefinition } from '../processing/metric-definitions.js';
-import type { QueryResult, CompanyInfo, MetricDefinition } from './types.js';
+import { RATIO_DEFINITIONS, findRatioByName, type RatioDefinition } from '../processing/ratio-definitions.js';
+import type { QueryResult, CompanyInfo, MetricDefinition, DataPoint } from './types.js';
 
 export interface QueryParams {
   company: string;
@@ -204,4 +205,169 @@ export async function executeCompareCore(params: CompareParams): Promise<Compare
   }
 
   return { results, errors };
+}
+
+// ── Ratio Execution ──────────────────────────────────────────────────
+
+export interface RatioParams {
+  company: string;
+  ratio: string;
+  years?: number;
+}
+
+export interface RatioDataPoint {
+  fiscal_year: number;
+  value: number;
+  numerator_value: number;
+  denominator_value: number;
+}
+
+export interface RatioResult {
+  company: CompanyInfo;
+  ratio: RatioDefinition;
+  data_points: RatioDataPoint[];
+  numerator_metric: string;
+  denominator_metric: string;
+}
+
+export interface RatioEngineResult {
+  success: boolean;
+  result?: RatioResult;
+  error?: {
+    type: 'company_not_found' | 'company_ambiguous' | 'ratio_not_found' | 'no_data' | 'api_error';
+    message: string;
+    suggestions?: Array<{ ticker: string; name: string }>;
+    availableRatios?: Array<{ id: string; display_name: string }>;
+  };
+}
+
+/**
+ * Execute a derived ratio query.
+ * Fetches both component metrics and computes the ratio per fiscal year.
+ */
+export async function executeRatioCore(params: RatioParams): Promise<RatioEngineResult> {
+  const { company: companyQuery, ratio: ratioQuery, years = 5 } = params;
+
+  // Resolve ratio
+  const ratio = RATIO_DEFINITIONS.find(r => r.id === ratioQuery) ?? findRatioByName(ratioQuery);
+  if (!ratio) {
+    return {
+      success: false,
+      error: {
+        type: 'ratio_not_found',
+        message: `Could not identify ratio: "${ratioQuery}"`,
+        availableRatios: RATIO_DEFINITIONS.map(r => ({ id: r.id, display_name: r.display_name })),
+      },
+    };
+  }
+
+  // Resolve company
+  const resolved = await resolveCompanyWithSuggestions(companyQuery);
+  if (!resolved.company) {
+    if (resolved.suggestions.length > 0) {
+      return {
+        success: false,
+        error: {
+          type: 'company_ambiguous',
+          message: `Ambiguous company: "${companyQuery}"`,
+          suggestions: resolved.suggestions.map(s => ({ ticker: s.ticker, name: s.name })),
+        },
+      };
+    }
+    return {
+      success: false,
+      error: {
+        type: 'company_not_found',
+        message: `Could not find company: "${companyQuery}". Try using a ticker symbol.`,
+      },
+    };
+  }
+
+  const company = resolved.company;
+  const numMetric = getMetricDefinition(ratio.numerator);
+  const denMetric = getMetricDefinition(ratio.denominator);
+
+  if (!numMetric || !denMetric) {
+    return {
+      success: false,
+      error: {
+        type: 'api_error',
+        message: `Internal error: metric ${ratio.numerator} or ${ratio.denominator} not found`,
+      },
+    };
+  }
+
+  // Fetch both metrics (cache means second call is instant)
+  const [numResult, denResult] = await Promise.all([
+    fetchMetricData(company, numMetric, years),
+    fetchMetricData(company, denMetric, years),
+  ]);
+
+  if (numResult.dataPoints.length === 0 || denResult.dataPoints.length === 0) {
+    const missing = numResult.dataPoints.length === 0 ? numMetric.display_name : denMetric.display_name;
+    return {
+      success: false,
+      error: {
+        type: 'no_data',
+        message: `No ${missing} data found for ${company.name}. Cannot compute ${ratio.display_name}.`,
+      },
+    };
+  }
+
+  // Build lookup maps by fiscal year
+  const numByYear = new Map(numResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
+  const denByYear = new Map(denResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
+
+  // Find overlapping years
+  const allYears = [...new Set([...numByYear.keys(), ...denByYear.keys()])].sort((a, b) => a - b);
+  const dataPoints: RatioDataPoint[] = [];
+
+  for (const year of allYears) {
+    const numVal = numByYear.get(year);
+    const denVal = denByYear.get(year);
+    if (numVal === undefined || denVal === undefined) continue;
+
+    let value: number;
+    if (ratio.operation === 'subtract') {
+      value = numVal - denVal;
+    } else {
+      if (denVal === 0) continue; // Skip division by zero
+      value = numVal / denVal;
+    }
+
+    dataPoints.push({
+      fiscal_year: year,
+      value: ratio.format === 'percentage' ? Math.round(value * 1000) / 10 : Math.round(value * 100) / 100,
+      numerator_value: numVal,
+      denominator_value: denVal,
+    });
+  }
+
+  if (dataPoints.length === 0) {
+    return {
+      success: false,
+      error: {
+        type: 'no_data',
+        message: `No overlapping data found for ${ratio.display_name}`,
+      },
+    };
+  }
+
+  const companyInfo: CompanyInfo = {
+    cik: company.cik,
+    ticker: company.ticker,
+    name: company.name,
+    fiscal_year_end_month: 0,
+  };
+
+  return {
+    success: true,
+    result: {
+      company: companyInfo,
+      ratio,
+      data_points: dataPoints,
+      numerator_metric: numMetric.display_name,
+      denominator_metric: denMetric.display_name,
+    },
+  };
 }

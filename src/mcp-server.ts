@@ -24,8 +24,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { executeQueryCore, executeCompareCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore } from './core/query-engine.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
+import { RATIO_DEFINITIONS } from './processing/ratio-definitions.js';
 import { getCacheStats } from './core/cache.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
 import { fetchInsiderActivity } from './processing/insider-processor.js';
@@ -202,6 +203,44 @@ server.tool(
         filing: { accession: t.filing_accession, date: t.filing_date },
       })),
       provenance: result.provenance,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+const RATIO_IDS = RATIO_DEFINITIONS.map(r => r.id) as [string, ...string[]];
+
+server.tool(
+  'query_financial_ratio',
+  'Compute a derived financial ratio (net margin, gross margin, operating margin, R&D intensity, SBC/revenue, debt-to-equity, free cash flow, capex/OCF) for a company using SEC EDGAR data.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+    ratio: z.enum(RATIO_IDS).describe('Financial ratio to compute'),
+    years: z.number().min(1).max(20).optional().default(5).describe('Number of fiscal years (default 5)'),
+  },
+  async ({ company, ratio, years }) => {
+    const result = await executeRatioCore({ company, ratio, years });
+
+    if (!result.success) {
+      let errorText = result.error!.message;
+      if (result.error!.availableRatios) {
+        errorText += '\n\nAvailable ratios:\n' +
+          result.error!.availableRatios.map(r => `  ${r.id} — ${r.display_name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const r = result.result!;
+    const output = {
+      company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
+      ratio: { id: r.ratio.id, display_name: r.ratio.display_name, description: r.ratio.description },
+      formula: {
+        numerator: r.numerator_metric,
+        denominator: r.denominator_metric,
+        operation: r.ratio.operation || 'divide',
+      },
+      data: r.data_points,
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };

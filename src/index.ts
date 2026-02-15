@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { executeQueryCore, executeCompareCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
@@ -15,6 +15,8 @@ import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
 import { getCompanySubmissions } from './core/sec-client.js';
 import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
+import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
+import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
 
 function validatePositiveInt(value: string | undefined, name: string): number | undefined {
   if (value === undefined) return undefined;
@@ -253,6 +255,73 @@ program
       process.exit(1);
     } finally {
       closeCache();
+    }
+  });
+
+program
+  .command('ratio')
+  .description('Compute a derived financial ratio (e.g., ratio AAPL net_margin)')
+  .argument('<company>', 'Company ticker or name')
+  .argument('<ratio>', 'Ratio name (e.g., net_margin, gross_margin, fcf, debt_to_equity)')
+  .option('-y, --years <n>', 'Number of years', '5')
+  .option('-j, --json', 'Output as JSON')
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, ratioArg: string, options: { years?: string; json?: boolean; csv?: boolean }) => {
+    try {
+      const years = validatePositiveInt(options.years || '5', '--years')!;
+
+      const result = await executeRatioCore({
+        company: companyArg,
+        ratio: ratioArg,
+        years,
+      });
+
+      if (!result.success) {
+        const err = result.error!;
+        if (err.type === 'ratio_not_found') {
+          console.error(chalk.red(err.message));
+          console.error('\nAvailable ratios:');
+          for (const r of RATIO_DEFINITIONS) {
+            console.error(`  ${chalk.cyan(r.id.padEnd(22))} ${r.display_name}`);
+          }
+        } else if (err.type === 'company_ambiguous') {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of err.suggestions!) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(err.message));
+        }
+        process.exit(1);
+      }
+
+      const r = result.result!;
+      if (options.json) {
+        console.log(renderRatioJson(r));
+      } else if (options.csv) {
+        console.log(renderRatioCsv(r));
+      } else {
+        console.log('');
+        console.log(renderRatioTable(r));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('ratios')
+  .description('List all supported financial ratios')
+  .action(() => {
+    console.log(chalk.bold('\nSupported Financial Ratios\n'));
+    for (const r of RATIO_DEFINITIONS) {
+      console.log(`  ${chalk.cyan(r.id.padEnd(22))} ${r.display_name}`);
+      console.log(`  ${''.padEnd(22)} ${chalk.dim(r.description)}`);
+      console.log('');
     }
   });
 
