@@ -1,6 +1,6 @@
 {
   "name": "sec-edgar-nl",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Trustworthy financial answers from SEC EDGAR filings with full provenance",
   "type": "module",
   "main": "dist/index.js",
@@ -15,12 +15,21 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/philmercadante/sec-edgar-nl.git"
+  },
   "keywords": [
     "sec",
     "edgar",
     "financial-data",
     "xbrl",
-    "cli"
+    "cli",
+    "mcp-server"
   ],
   "license": "MIT",
   "dependencies": {

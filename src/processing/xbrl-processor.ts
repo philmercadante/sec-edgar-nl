@@ -29,10 +29,24 @@ export interface ConceptSelectionInfo {
   selected_reason: string;
 }
 
+/** Info about a restated period */
+export interface RestatementInfo {
+  fiscal_year: number;
+  period_end: string;
+  original_value: number;
+  original_filing: string; // accession number
+  original_filing_date: string;
+  restated_value: number;
+  restated_filing: string; // accession number
+  restated_filing_date: string;
+  change_pct: number; // percentage change
+}
+
 export interface FetchResult {
   dataPoints: DataPoint[];
   conceptUsed: string;
   conceptSelection: ConceptSelectionInfo;
+  restatements: RestatementInfo[];
 }
 
 /**
@@ -47,7 +61,7 @@ export async function fetchMetricData(
   const companyFacts = await getCompanyFacts(company.cik);
 
   const conceptsTried: ConceptSelectionInfo['concepts_tried'] = [];
-  let bestResult: { facts: SecFact[]; concept: string; maxFy: number; priority: number } | null = null;
+  let bestResult: { facts: SecFact[]; concept: string; maxFy: number; priority: number; restatements: RestatementInfo[] } | null = null;
 
   for (const concept of metric.xbrl_concepts.sort((a, b) => a.priority - b.priority)) {
     const unit = metric.unit_type === 'currency' ? 'USD'
@@ -68,7 +82,7 @@ export async function fetchMetricData(
     }
 
     const annualFacts = filterAnnualFacts(facts, metric);
-    const deduped = annualFacts.length > 0 ? deduplicateFacts(annualFacts) : [];
+    const { deduped, restatements } = annualFacts.length > 0 ? deduplicateFacts(annualFacts) : { deduped: [], restatements: [] };
     const maxFy = deduped.length > 0 ? Math.max(...deduped.map(f => f.fy)) : null;
 
     conceptsTried.push({
@@ -89,6 +103,7 @@ export async function fetchMetricData(
         concept: `${concept.taxonomy}:${concept.concept}`,
         maxFy: maxFy!,
         priority: concept.priority,
+        restatements,
       };
     }
   }
@@ -101,6 +116,7 @@ export async function fetchMetricData(
         concepts_tried: conceptsTried,
         selected_reason: 'No XBRL concepts had annual data for this company',
       },
+      restatements: [],
     };
   }
 
@@ -131,6 +147,10 @@ export async function fetchMetricData(
     bestResult!.concept
   ));
 
+  // Filter restatements to only include periods in our output window
+  const outputYears = new Set(dataPoints.map(dp => dp.fiscal_year));
+  const relevantRestatements = bestResult.restatements.filter(r => outputYears.has(r.fiscal_year));
+
   return {
     dataPoints,
     conceptUsed: bestResult.concept,
@@ -138,6 +158,7 @@ export async function fetchMetricData(
       concepts_tried: conceptsTried,
       selected_reason: selectedReason,
     },
+    restatements: relevantRestatements,
   };
 }
 
@@ -205,6 +226,7 @@ export async function fetchQuarterlyData(
         concepts_tried: conceptsTried,
         selected_reason: 'No XBRL concepts had quarterly data for this company',
       },
+      restatements: [],
     };
   }
 
@@ -229,6 +251,7 @@ export async function fetchQuarterlyData(
       concepts_tried: conceptsTried,
       selected_reason: `Selected ${bestResult.concept} (most recent: ${bestResult.maxEndDate})`,
     },
+    restatements: [],
   };
 }
 
@@ -359,23 +382,62 @@ function filterAnnualFacts(facts: SecFact[], metric: MetricDefinition): SecFact[
  * Critical insight: each 10-K contains the current year AND prior years
  * for comparison, all sharing the same `fy` value (the filing's fiscal year).
  * We must group by `end` date to correctly identify distinct annual periods.
+ *
+ * Also detects restatements: when the same period has different values
+ * across multiple filings.
  */
-function deduplicateFacts(facts: SecFact[]): SecFact[] {
-  const byPeriodEnd = new Map<string, SecFact>();
+function deduplicateFacts(facts: SecFact[]): { deduped: SecFact[]; restatements: RestatementInfo[] } {
+  const byPeriodEnd = new Map<string, SecFact[]>();
 
   for (const fact of facts) {
     const key = fact.end;
     const existing = byPeriodEnd.get(key);
-    if (!existing || fact.filed > existing.filed) {
-      byPeriodEnd.set(key, fact);
+    if (existing) {
+      existing.push(fact);
+    } else {
+      byPeriodEnd.set(key, [fact]);
     }
   }
 
-  // Derive actual fiscal year from end date
-  return Array.from(byPeriodEnd.values()).map(fact => ({
-    ...fact,
-    fy: deriveFiscalYear(fact.end),
-  }));
+  const restatements: RestatementInfo[] = [];
+  const deduped: SecFact[] = [];
+
+  for (const [periodEnd, periodFacts] of byPeriodEnd) {
+    // Sort by filing date (most recent first)
+    const sorted = periodFacts.sort((a, b) => b.filed.localeCompare(a.filed));
+    const latest = sorted[0];
+
+    // Detect restatement: find the earliest filing with a different value
+    const uniqueValues = new Set(sorted.map(f => f.val));
+    if (uniqueValues.size > 1) {
+      // Find the original (earliest) value that differs from latest
+      const original = sorted[sorted.length - 1];
+      if (original.val !== latest.val) {
+        const changePct = original.val !== 0
+          ? Math.round(((latest.val - original.val) / Math.abs(original.val)) * 1000) / 10
+          : 0;
+
+        restatements.push({
+          fiscal_year: deriveFiscalYear(periodEnd),
+          period_end: periodEnd,
+          original_value: original.val,
+          original_filing: original.accn,
+          original_filing_date: original.filed,
+          restated_value: latest.val,
+          restated_filing: latest.accn,
+          restated_filing_date: latest.filed,
+          change_pct: changePct,
+        });
+      }
+    }
+
+    deduped.push({
+      ...latest,
+      fy: deriveFiscalYear(periodEnd),
+    });
+  }
+
+  return { deduped, restatements };
 }
 
 /**

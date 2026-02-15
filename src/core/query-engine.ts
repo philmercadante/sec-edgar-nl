@@ -144,7 +144,7 @@ export async function executeQueryCore(params: QueryParams): Promise<QueryEngine
 
   // Fetch data — for target year lookups, fetch extra history to ensure we have it
   const fetchYears = targetYear ? 50 : years;
-  let { dataPoints, conceptUsed, conceptSelection } = periodType === 'quarterly'
+  let { dataPoints, conceptUsed, conceptSelection, restatements } = periodType === 'quarterly'
     ? await fetchQuarterlyData(company, metric, quarters)
     : await fetchMetricData(company, metric, fetchYears);
 
@@ -173,7 +173,7 @@ export async function executeQueryCore(params: QueryParams): Promise<QueryEngine
   };
 
   const calculations = calculateGrowth(dataPoints);
-  const provenance = buildProvenance(dataPoints, metric, conceptUsed, conceptSelection);
+  const provenance = buildProvenance(dataPoints, metric, conceptUsed, conceptSelection, restatements);
 
   return {
     success: true,
@@ -220,7 +220,7 @@ export async function executeCompareCore(params: CompareParams): Promise<Compare
     const company = resolved.company;
 
     try {
-      const { dataPoints, conceptUsed, conceptSelection } = await fetchMetricData(
+      const { dataPoints, conceptUsed, conceptSelection, restatements } = await fetchMetricData(
         company,
         metric,
         years
@@ -243,7 +243,7 @@ export async function executeCompareCore(params: CompareParams): Promise<Compare
         metric,
         data_points: dataPoints,
         calculations: calculateGrowth(dataPoints),
-        provenance: buildProvenance(dataPoints, metric, conceptUsed, conceptSelection),
+        provenance: buildProvenance(dataPoints, metric, conceptUsed, conceptSelection, restatements),
       });
     } catch (err) {
       errors.push({ ticker: tickers[i], message: err instanceof Error ? err.message : String(err) });

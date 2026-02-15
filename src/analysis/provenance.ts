@@ -1,5 +1,5 @@
 import type { DataPoint, ProvenanceInfo, MetricDefinition } from '../core/types.js';
-import type { ConceptSelectionInfo } from '../processing/xbrl-processor.js';
+import type { ConceptSelectionInfo, RestatementInfo } from '../processing/xbrl-processor.js';
 
 /**
  * Build provenance info from processed data points.
@@ -10,7 +10,8 @@ export function buildProvenance(
   dataPoints: DataPoint[],
   metric: MetricDefinition,
   conceptUsed: string,
-  conceptSelection?: ConceptSelectionInfo
+  conceptSelection?: ConceptSelectionInfo,
+  restatements?: RestatementInfo[]
 ): ProvenanceInfo {
   // Collect unique filings used
   const filingMap = new Map<string, {
@@ -33,10 +34,14 @@ export function buildProvenance(
 
   const notes: string[] = [];
 
-  // Check for restatements
-  const restated = dataPoints.filter(dp => dp.restated_in);
-  if (restated.length > 0) {
-    notes.push(`${restated.length} value(s) were restated in subsequent filings`);
+  // Flag restatements
+  if (restatements && restatements.length > 0) {
+    for (const r of restatements) {
+      const dir = r.change_pct > 0 ? '+' : '';
+      notes.push(
+        `FY${r.fiscal_year} was restated: original $${formatCompact(r.original_value)} → $${formatCompact(r.restated_value)} (${dir}${r.change_pct}%) in filing ${r.restated_filing_date}`
+      );
+    }
   }
 
   // Detect quarterly vs annual from data
@@ -75,4 +80,14 @@ export function buildProvenance(
     period_type: isQuarterly ? 'Quarterly (single quarter)' : 'Annual (full fiscal year)',
     notes,
   };
+}
+
+/** Compact number formatting for provenance notes */
+function formatCompact(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1e12) return `${(value / 1e12).toFixed(1)}T`;
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(value / 1e3).toFixed(0)}K`;
+  return value.toFixed(0);
 }
