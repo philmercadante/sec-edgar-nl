@@ -116,6 +116,17 @@ describe('calculateGrowth', () => {
     expect(result.cagr_years).toBe(0);
   });
 
+  it('returns null CAGR for only 2 data points (1 year span)', () => {
+    // CAGR requires at least 2 years span (3 data points) to be meaningful
+    const data = [
+      makeDataPoint(2023, 100_000_000),
+      makeDataPoint(2024, 150_000_000),
+    ];
+    const result = calculateGrowth(data);
+    expect(result.cagr).toBeNull();
+    expect(result.cagr_years).toBe(1);
+  });
+
   it('returns null CAGR for extreme values that produce Infinity', () => {
     // Extremely small first value could produce Infinity CAGR
     const data = [

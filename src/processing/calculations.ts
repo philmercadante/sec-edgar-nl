@@ -30,7 +30,7 @@ export function calculateGrowth(dataPoints: DataPoint[]): Calculations {
   let cagr: number | null = null;
   const cagr_years = dataPoints.length - 1;
 
-  if (cagr_years > 0) {
+  if (cagr_years >= 2) {
     const first = dataPoints[0].value;
     const last = dataPoints[dataPoints.length - 1].value;
 

@@ -18,7 +18,7 @@ const CACHE_DB = join(CACHE_DIR, 'cache.db');
 
 let db: Database.Database | null = null;
 
-/** In-memory LRU for hot-path cache hits within a session */
+/** In-memory FIFO cache for hot-path cache hits within a session */
 const memCache = new Map<string, { body: string; expiresAt: number }>();
 const MEM_CACHE_MAX = 100;
 

@@ -16,6 +16,50 @@ import { RATIO_DEFINITIONS, findRatioByName, type RatioDefinition } from '../pro
 import type { SummaryResult } from '../output/summary-renderer.js';
 import type { QueryResult, CompanyInfo, MetricDefinition, DataPoint } from './types.js';
 
+/**
+ * Shared utility: compute ratio data points from two metric data series.
+ * Used by executeRatioCore and executeCompareRatioCore to avoid duplication.
+ */
+function computeRatioDataPoints(
+  numDataPoints: DataPoint[],
+  denDataPoints: DataPoint[],
+  operation: 'divide' | 'subtract',
+  format: string,
+): { dataPoints: RatioDataPoint[]; divByZeroCount: number } {
+  const numByYear = new Map(numDataPoints.map(dp => [dp.fiscal_year, dp.value]));
+  const denByYear = new Map(denDataPoints.map(dp => [dp.fiscal_year, dp.value]));
+  const allYears = [...new Set([...numByYear.keys(), ...denByYear.keys()])].sort((a, b) => a - b);
+
+  const dataPoints: RatioDataPoint[] = [];
+  let divByZeroCount = 0;
+
+  for (const year of allYears) {
+    const numVal = numByYear.get(year);
+    const denVal = denByYear.get(year);
+    if (numVal === undefined || denVal === undefined) continue;
+
+    let value: number;
+    if (operation === 'subtract') {
+      value = numVal - denVal;
+    } else {
+      if (denVal === 0) {
+        divByZeroCount++;
+        continue;
+      }
+      value = numVal / denVal;
+    }
+
+    dataPoints.push({
+      fiscal_year: year,
+      value: format === 'percentage' ? Math.round(value * 1000) / 10 : Math.round(value * 100) / 100,
+      numerator_value: numVal,
+      denominator_value: denVal,
+    });
+  }
+
+  return { dataPoints, divByZeroCount };
+}
+
 export interface QueryParams {
   company: string;
   metric: string;
@@ -316,38 +360,9 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
     };
   }
 
-  // Build lookup maps by fiscal year
-  const numByYear = new Map(numResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
-  const denByYear = new Map(denResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
-
-  // Find overlapping years
-  const allYears = [...new Set([...numByYear.keys(), ...denByYear.keys()])].sort((a, b) => a - b);
-  const dataPoints: RatioDataPoint[] = [];
-  let divByZeroCount = 0;
-
-  for (const year of allYears) {
-    const numVal = numByYear.get(year);
-    const denVal = denByYear.get(year);
-    if (numVal === undefined || denVal === undefined) continue;
-
-    let value: number;
-    if (ratio.operation === 'subtract') {
-      value = numVal - denVal;
-    } else {
-      if (denVal === 0) {
-        divByZeroCount++;
-        continue;
-      }
-      value = numVal / denVal;
-    }
-
-    dataPoints.push({
-      fiscal_year: year,
-      value: ratio.format === 'percentage' ? Math.round(value * 1000) / 10 : Math.round(value * 100) / 100,
-      numerator_value: numVal,
-      denominator_value: denVal,
-    });
-  }
+  const { dataPoints, divByZeroCount } = computeRatioDataPoints(
+    numResult.dataPoints, denResult.dataPoints, ratio.operation ?? 'divide', ratio.format
+  );
 
   if (dataPoints.length === 0) {
     const reason = divByZeroCount > 0
@@ -447,32 +462,9 @@ export async function executeCompareRatioCore(params: CompareRatioParams): Promi
         continue;
       }
 
-      const numByYear = new Map(numResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
-      const denByYear = new Map(denResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
-
-      const allYears = [...new Set([...numByYear.keys(), ...denByYear.keys()])].sort((a, b) => a - b);
-      const dataPoints: RatioDataPoint[] = [];
-
-      for (const year of allYears) {
-        const numVal = numByYear.get(year);
-        const denVal = denByYear.get(year);
-        if (numVal === undefined || denVal === undefined) continue;
-
-        let value: number;
-        if (ratio.operation === 'subtract') {
-          value = numVal - denVal;
-        } else {
-          if (denVal === 0) continue;
-          value = numVal / denVal;
-        }
-
-        dataPoints.push({
-          fiscal_year: year,
-          value: ratio.format === 'percentage' ? Math.round(value * 1000) / 10 : Math.round(value * 100) / 100,
-          numerator_value: numVal,
-          denominator_value: denVal,
-        });
-      }
+      const { dataPoints } = computeRatioDataPoints(
+        numResult.dataPoints, denResult.dataPoints, ratio.operation ?? 'divide', ratio.format
+      );
 
       if (dataPoints.length === 0) {
         errors.push({ ticker: tickers[i], message: `No overlapping data to compute ${ratio.display_name}` });

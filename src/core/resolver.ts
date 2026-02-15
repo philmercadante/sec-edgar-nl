@@ -129,27 +129,31 @@ export async function resolveCompany(query: string): Promise<CikLookup | null> {
 export async function resolveCompanyWithSuggestions(query: string): Promise<ResolveResult> {
   await loadTickers();
 
+  if (!tickerMap || !nameMap) {
+    throw new Error('Failed to load company data from SEC. Check your network connection and try again.');
+  }
+
   const upper = query.toUpperCase().trim();
   const lower = query.toLowerCase().trim();
 
   // 1. Exact ticker match
-  const byTicker = tickerMap!.get(upper);
+  const byTicker = tickerMap.get(upper);
   if (byTicker) return { company: byTicker, suggestions: [] };
 
   // 2. Common alias
   const alias = ALIASES[lower];
   if (alias) {
-    const byAlias = tickerMap!.get(alias);
+    const byAlias = tickerMap.get(alias);
     if (byAlias) return { company: byAlias, suggestions: [] };
   }
 
   // 3. Exact name match
-  const byName = nameMap!.get(lower);
+  const byName = nameMap.get(lower);
   if (byName) return { company: byName, suggestions: [] };
 
   // 4. Fuzzy name match — find names containing the query
   const matches: CikLookup[] = [];
-  for (const [name, lookup] of nameMap!) {
+  for (const [name, lookup] of nameMap) {
     if (name.includes(lower)) {
       matches.push(lookup);
     }

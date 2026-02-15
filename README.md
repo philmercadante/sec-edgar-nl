@@ -78,7 +78,8 @@ Computed from the base metrics — no additional API calls:
 
 - **Natural language queries** — "Apple's R&D spending over the last 5 years"
 - **Company screening** — Find all companies with revenue > $100B using Frames API
-- **Multi-company comparison** — Compare revenue across AAPL, MSFT, GOOGL
+- **Multi-company comparison** — Compare metrics or ratios across AAPL, MSFT, GOOGL
+- **Full-text filing search** — Search all EDGAR filings by content ("artificial intelligence", "tariff risk")
 - **Company profile** — SIC code, industry, fiscal year end, filing history
 - **Insider trading** — Form 4 buy/sell activity with bullish/bearish signals
 - **Filing timeline** — List recent SEC filings with direct EDGAR links
@@ -148,6 +149,10 @@ sec-edgar-nl ratio MSFT gross_margin --years 10
 sec-edgar-nl ratio TSLA free_cash_flow --json
 sec-edgar-nl ratio AAPL return_on_equity
 sec-edgar-nl ratios  # List all available ratios
+
+# Compare a ratio across companies
+sec-edgar-nl compare-ratio AAPL MSFT GOOGL net_margin
+sec-edgar-nl compare-ratio AAPL MSFT debt_to_equity --csv
 ```
 
 ### Financial summary
@@ -178,6 +183,14 @@ sec-edgar-nl insiders NVDA --days 180 --json
 sec-edgar-nl filings AAPL
 sec-edgar-nl filings MSFT --form 10-K --limit 5
 sec-edgar-nl filings TSLA --json
+```
+
+### Search filings
+
+```bash
+sec-edgar-nl search "artificial intelligence" --form 10-K --limit 10
+sec-edgar-nl search "supply chain risk" --since 2024-01-01
+sec-edgar-nl search "CEO departure" --form 8-K --json
 ```
 
 ### Explore XBRL concepts
@@ -233,12 +246,14 @@ Add to your `claude_desktop_config.json`:
 |------|-------------|
 | `query_financial_metric` | Fetch a metric for a company |
 | `compare_companies` | Compare a metric across companies |
+| `compare_ratios` | Compare a ratio across companies |
 | `screen_companies` | Screen all companies by a metric (Frames API) |
 | `query_financial_ratio` | Compute a derived ratio |
 | `company_financial_summary` | All metrics for one company |
 | `company_info` | Company profile (SIC, industry, filing history) |
 | `query_insider_trading` | Insider buy/sell activity |
 | `list_company_filings` | Recent SEC filing list |
+| `search_filings` | Full-text search across EDGAR filings |
 | `explore_xbrl_concepts` | Discover available XBRL data |
 | `list_metrics` | List all supported metrics |
 
@@ -246,11 +261,6 @@ Add to your `claude_desktop_config.json`:
 
 - `sec-edgar-nl://metrics` — Full metric definitions with XBRL mappings
 - `sec-edgar-nl://cache/stats` — Cache statistics
-
-### MCP Prompts
-
-- `analyze_company` — Comprehensive single-company analysis workflow
-- `compare_financials` — Multi-company comparison workflow
 
 ## Architecture
 
@@ -298,7 +308,7 @@ sec-edgar-nl/
 ## Testing
 
 ```bash
-npm test           # Run all tests (131 tests)
+npm test           # Run all tests (146 tests)
 npm run test:watch # Watch mode
 ```
 
