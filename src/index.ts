@@ -8,8 +8,8 @@ import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
 import { renderCsv, renderComparisonCsv } from './output/csv-renderer.js';
-import { closeCache, clearCache, getCacheStats } from './core/cache.js';
-import { METRIC_DEFINITIONS, findMetricByName } from './processing/metric-definitions.js';
+import { closeCache, clearCache, getCacheStats, addToWatchlist, removeFromWatchlist, getWatchlist, updateWatchlistEntry, clearWatchlist } from './core/cache.js';
+import { METRIC_DEFINITIONS, findMetricByName, getMetricDefinition } from './processing/metric-definitions.js';
 import { fetchInsiderActivity } from './processing/insider-processor.js';
 import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
@@ -18,6 +18,16 @@ import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
 import { renderSummaryTable, renderSummaryJson } from './output/summary-renderer.js';
+
+function formatWatchValue(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(2)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
 
 function validatePositiveInt(value: string | undefined, name: string): number | undefined {
   if (value === undefined) return undefined;
@@ -571,6 +581,129 @@ program
           console.log(`    ${chalk.dim(c.label)} | ${c.taxonomy} | ${c.units.join(', ')} | ${c.fact_count} facts | ${yearRange}`);
         }
         console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('watch')
+  .description('Manage a watchlist of company metrics to monitor for changes')
+  .argument('<action>', 'Action: add, remove, list, check, clear')
+  .argument('[ticker]', 'Company ticker (for add/remove)')
+  .argument('[metric]', 'Metric ID (for add/remove)')
+  .action(async (action: string, ticker?: string, metric?: string) => {
+    try {
+      switch (action) {
+        case 'add': {
+          if (!ticker || !metric) {
+            console.error(chalk.red('Usage: sec-edgar-nl watch add <ticker> <metric>'));
+            console.error('Example: sec-edgar-nl watch add AAPL revenue');
+            process.exit(1);
+          }
+          const metricDef = getMetricDefinition(metric) ?? findMetricByName(metric);
+          if (!metricDef) {
+            console.error(chalk.red(`Unknown metric: "${metric}"`));
+            console.error('Run "sec-edgar-nl metrics" to see available metrics.');
+            process.exit(1);
+          }
+          addToWatchlist(ticker.toUpperCase(), metricDef.id);
+          console.log(chalk.green(`Added ${ticker.toUpperCase()} ${metricDef.display_name} to watchlist.`));
+          break;
+        }
+        case 'remove': {
+          if (!ticker || !metric) {
+            console.error(chalk.red('Usage: sec-edgar-nl watch remove <ticker> <metric>'));
+            process.exit(1);
+          }
+          const removed = removeFromWatchlist(ticker.toUpperCase(), metric);
+          if (removed) {
+            console.log(chalk.green(`Removed ${ticker.toUpperCase()} ${metric} from watchlist.`));
+          } else {
+            console.error(chalk.yellow(`${ticker.toUpperCase()} ${metric} not found in watchlist.`));
+          }
+          break;
+        }
+        case 'list': {
+          const entries = getWatchlist();
+          if (entries.length === 0) {
+            console.log(chalk.dim('\n  Watchlist is empty. Add items with: sec-edgar-nl watch add AAPL revenue\n'));
+            break;
+          }
+          console.log(chalk.bold('\n  Watchlist\n'));
+          for (const e of entries) {
+            const lastInfo = e.last_value !== null
+              ? chalk.dim(` (FY${e.last_fiscal_year}: ${formatWatchValue(e.last_value)}, checked ${e.last_checked?.split('T')[0]})`)
+              : chalk.dim(' (not yet checked)');
+            console.log(`  ${chalk.cyan(e.ticker.padEnd(8))} ${e.metric_id.padEnd(22)}${lastInfo}`);
+          }
+          console.log('');
+          break;
+        }
+        case 'check': {
+          const entries = getWatchlist();
+          if (entries.length === 0) {
+            console.log(chalk.dim('\n  Watchlist is empty.\n'));
+            break;
+          }
+          console.log(chalk.bold('\n  Watchlist Check\n'));
+          for (const entry of entries) {
+            try {
+              const result = await executeQueryCore({
+                company: entry.ticker,
+                metric: entry.metric_id,
+                years: 1,
+              });
+              if (!result.success || !result.result || result.result.data_points.length === 0) {
+                console.log(`  ${chalk.cyan(entry.ticker.padEnd(8))} ${entry.metric_id.padEnd(22)} ${chalk.red('No data')}`);
+                continue;
+              }
+              const dp = result.result.data_points[result.result.data_points.length - 1];
+              const newValue = dp.value;
+              const newYear = dp.fiscal_year;
+              const newPeriodEnd = dp.period_end;
+
+              let status: string;
+              if (entry.last_value === null) {
+                status = chalk.cyan(`NEW: FY${newYear} ${formatWatchValue(newValue)}`);
+              } else if (newYear > (entry.last_fiscal_year ?? 0)) {
+                const change = entry.last_value !== 0
+                  ? ((newValue - entry.last_value) / Math.abs(entry.last_value)) * 100
+                  : 0;
+                const changeStr = change >= 0 ? chalk.green(`+${change.toFixed(1)}%`) : chalk.red(`${change.toFixed(1)}%`);
+                status = chalk.yellow(`NEW PERIOD: FY${newYear} ${formatWatchValue(newValue)} (${changeStr} vs FY${entry.last_fiscal_year})`);
+              } else if (newValue !== entry.last_value) {
+                const change = entry.last_value !== 0
+                  ? ((newValue - entry.last_value) / Math.abs(entry.last_value)) * 100
+                  : 0;
+                const changeStr = change >= 0 ? chalk.green(`+${change.toFixed(1)}%`) : chalk.red(`${change.toFixed(1)}%`);
+                status = chalk.yellow(`RESTATED: FY${newYear} ${formatWatchValue(newValue)} (was ${formatWatchValue(entry.last_value)}, ${changeStr})`);
+              } else {
+                status = chalk.dim(`FY${newYear} ${formatWatchValue(newValue)} (unchanged)`);
+              }
+
+              console.log(`  ${chalk.cyan(entry.ticker.padEnd(8))} ${entry.metric_id.padEnd(22)} ${status}`);
+
+              updateWatchlistEntry(entry.ticker, entry.metric_id, newValue, newYear, newPeriodEnd);
+            } catch (err) {
+              console.log(`  ${chalk.cyan(entry.ticker.padEnd(8))} ${entry.metric_id.padEnd(22)} ${chalk.red('Error: ' + (err instanceof Error ? err.message : String(err)))}`);
+            }
+          }
+          console.log('');
+          break;
+        }
+        case 'clear': {
+          clearWatchlist();
+          console.log(chalk.green('Watchlist cleared.'));
+          break;
+        }
+        default:
+          console.error(chalk.red(`Unknown action: "${action}". Use: add, remove, list, check, clear`));
+          process.exit(1);
       }
     } catch (err) {
       console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));

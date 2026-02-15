@@ -40,6 +40,19 @@ function getDb(): Database.Database {
         expires_at TEXT NOT NULL
       )
     `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS watchlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker TEXT NOT NULL,
+        metric_id TEXT NOT NULL,
+        last_value REAL,
+        last_fiscal_year INTEGER,
+        last_period_end TEXT,
+        last_checked TEXT,
+        added_at TEXT NOT NULL,
+        UNIQUE(ticker, metric_id)
+      )
+    `);
   } catch {
     // DB corrupted — delete and recreate
     try { unlinkSync(CACHE_DB); } catch { /* ignore */ }
@@ -55,6 +68,19 @@ function getDb(): Database.Database {
         response_body TEXT NOT NULL,
         fetched_at TEXT NOT NULL,
         expires_at TEXT NOT NULL
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS watchlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker TEXT NOT NULL,
+        metric_id TEXT NOT NULL,
+        last_value REAL,
+        last_fiscal_year INTEGER,
+        last_period_end TEXT,
+        last_checked TEXT,
+        added_at TEXT NOT NULL,
+        UNIQUE(ticker, metric_id)
       )
     `);
   }
@@ -129,6 +155,59 @@ export function clearCache(): void {
   memCache.clear();
   const d = getDb();
   d.exec('DELETE FROM http_cache');
+}
+
+// ── Watchlist ──────────────────────────────────────────────────────────
+
+export interface WatchlistEntry {
+  id: number;
+  ticker: string;
+  metric_id: string;
+  last_value: number | null;
+  last_fiscal_year: number | null;
+  last_period_end: string | null;
+  last_checked: string | null;
+  added_at: string;
+}
+
+export function addToWatchlist(ticker: string, metricId: string): void {
+  const d = getDb();
+  d.prepare(`
+    INSERT OR IGNORE INTO watchlist (ticker, metric_id, added_at)
+    VALUES (?, ?, ?)
+  `).run(ticker.toUpperCase(), metricId, new Date().toISOString());
+}
+
+export function removeFromWatchlist(ticker: string, metricId: string): boolean {
+  const d = getDb();
+  const result = d.prepare(
+    'DELETE FROM watchlist WHERE ticker = ? AND metric_id = ?'
+  ).run(ticker.toUpperCase(), metricId);
+  return result.changes > 0;
+}
+
+export function getWatchlist(): WatchlistEntry[] {
+  const d = getDb();
+  return d.prepare('SELECT * FROM watchlist ORDER BY ticker, metric_id').all() as WatchlistEntry[];
+}
+
+export function updateWatchlistEntry(
+  ticker: string,
+  metricId: string,
+  value: number,
+  fiscalYear: number,
+  periodEnd: string,
+): void {
+  const d = getDb();
+  d.prepare(`
+    UPDATE watchlist SET last_value = ?, last_fiscal_year = ?, last_period_end = ?, last_checked = ?
+    WHERE ticker = ? AND metric_id = ?
+  `).run(value, fiscalYear, periodEnd, new Date().toISOString(), ticker.toUpperCase(), metricId);
+}
+
+export function clearWatchlist(): void {
+  const d = getDb();
+  d.exec('DELETE FROM watchlist');
 }
 
 /** Get cache stats for diagnostics */
