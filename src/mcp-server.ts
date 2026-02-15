@@ -595,12 +595,16 @@ server.tool(
       }
     }
 
-    const output = {
+    const output: Record<string, unknown> = {
       company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
       metrics: r.metrics,
       years: r.years,
       data,
     };
+
+    if (r.warnings && r.warnings.length > 0) {
+      output.warnings = r.warnings;
+    }
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
   }

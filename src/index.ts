@@ -513,6 +513,10 @@ program
         process.exit(1);
       }
 
+      for (const w of result.result!.warnings) {
+        console.error(chalk.yellow(`Warning: ${w}`));
+      }
+
       if (options.json) {
         console.log(renderMultiMetricJson(result.result!));
       } else if (options.csv) {

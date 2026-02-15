@@ -523,6 +523,9 @@ describe('executeMultiMetricCore', () => {
     expect(result.result!.data.size).toBe(2);
     expect(result.result!.data.get('revenue')!.size).toBe(0);
     expect(result.result!.data.get('net_income')!.size).toBe(1);
+    // Warning should be surfaced
+    expect(result.result!.warnings).toHaveLength(1);
+    expect(result.result!.warnings[0]).toContain('API error');
   });
 });
 

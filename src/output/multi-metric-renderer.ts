@@ -83,7 +83,7 @@ export function renderMultiMetricJson(result: MultiMetricResult): string {
     }
   }
 
-  return JSON.stringify({
+  const output: Record<string, unknown> = {
     company: {
       cik: result.company.cik,
       ticker: result.company.ticker,
@@ -96,7 +96,13 @@ export function renderMultiMetricJson(result: MultiMetricResult): string {
     })),
     years: result.years,
     data,
-  }, null, 2);
+  };
+
+  if (result.warnings && result.warnings.length > 0) {
+    output.warnings = result.warnings;
+  }
+
+  return JSON.stringify(output, null, 2);
 }
 
 /**
