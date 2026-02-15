@@ -7,13 +7,14 @@ import { executeQueryCore, executeCompareCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
+import { renderCsv, renderComparisonCsv } from './output/csv-renderer.js';
 import { closeCache, clearCache, getCacheStats } from './core/cache.js';
 import { METRIC_DEFINITIONS, findMetricByName } from './processing/metric-definitions.js';
 import { fetchInsiderActivity } from './processing/insider-processor.js';
 import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
 
-async function executeQuery(queryStr: string, options: { json?: boolean; years?: string }): Promise<void> {
+async function executeQuery(queryStr: string, options: { json?: boolean; csv?: boolean; years?: string }): Promise<void> {
   try {
     const parsed = parseQuery(queryStr);
 
@@ -87,6 +88,8 @@ async function executeQuery(queryStr: string, options: { json?: boolean; years?:
     // Render
     if (options.json) {
       console.log(renderJson(r));
+    } else if (options.csv) {
+      console.log(renderCsv(r));
     } else {
       console.log('');
       console.log(renderTable(r));
@@ -113,8 +116,9 @@ program
   .description('Query a financial metric for a company')
   .argument('<query...>', 'Natural language query (e.g., "Apple R&D spending 5 years")')
   .option('-j, --json', 'Output as JSON instead of table')
+  .option('-c, --csv', 'Output as CSV')
   .option('-y, --years <n>', 'Number of years to show')
-  .action(async (queryParts: string[], options: { json?: boolean; years?: string }) => {
+  .action(async (queryParts: string[], options: { json?: boolean; csv?: boolean; years?: string }) => {
     await executeQuery(queryParts.join(' '), options);
   });
 
@@ -161,8 +165,9 @@ program
   .description('Compare a metric across multiple companies (e.g., compare AAPL MSFT GOOGL revenue)')
   .argument('<args...>', 'Tickers and metric name')
   .option('-j, --json', 'Output as JSON')
+  .option('-c, --csv', 'Output as CSV')
   .option('-y, --years <n>', 'Number of years', '5')
-  .action(async (args: string[], options: { json?: boolean; years?: string }) => {
+  .action(async (args: string[], options: { json?: boolean; csv?: boolean; years?: string }) => {
     try {
       const years = parseInt(options.years || '5', 10);
 
@@ -212,6 +217,8 @@ program
 
       if (options.json) {
         console.log(renderComparisonJson(results));
+      } else if (options.csv) {
+        console.log(renderComparisonCsv(results));
       } else {
         console.log('');
         console.log(renderComparison(results));
@@ -270,12 +277,15 @@ program
 program.on('command:*', async (args) => {
   const allArgs = program.args;
   let json = false;
+  let csv = false;
   let years: string | undefined;
   const queryParts: string[] = [];
 
   for (let i = 0; i < allArgs.length; i++) {
     if (allArgs[i] === '--json' || allArgs[i] === '-j') {
       json = true;
+    } else if (allArgs[i] === '--csv' || allArgs[i] === '-c') {
+      csv = true;
     } else if ((allArgs[i] === '--years' || allArgs[i] === '-y') && i + 1 < allArgs.length) {
       years = allArgs[++i];
     } else {
@@ -284,7 +294,7 @@ program.on('command:*', async (args) => {
   }
 
   if (queryParts.length > 0) {
-    await executeQuery(queryParts.join(' '), { json, years });
+    await executeQuery(queryParts.join(' '), { json, csv, years });
   }
 });
 
