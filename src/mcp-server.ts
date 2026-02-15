@@ -6,9 +6,10 @@
  * Exposes SEC EDGAR financial data as MCP tools that Claude Desktop,
  * Claude Code, and other MCP clients can use directly.
  *
- * Tools (13):
+ * Tools (14):
  *   - query_financial_metric: fetch a metric for one company
  *   - compare_companies: compare a metric across multiple companies
+ *   - compare_metrics: compare multiple metrics for one company
  *   - compare_ratios: compare a ratio across multiple companies
  *   - query_financial_ratio: compute a derived financial ratio
  *   - company_financial_summary: all metrics for one company
@@ -33,7 +34,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore } from './core/query-engine.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
 import { RATIO_DEFINITIONS } from './processing/ratio-definitions.js';
 import { getCacheStats } from './core/cache.js';
@@ -548,6 +549,54 @@ server.tool(
         value: c.value,
         period_end: c.period_end,
       })),
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
+  'compare_metrics',
+  'Compare multiple financial metrics for one company side-by-side across fiscal years. Useful for seeing revenue, net income, cash flow, etc. together for one company. Efficiently uses a single SEC API call.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+    metrics: z.array(z.enum(METRIC_IDS)).min(2).max(10).describe('Array of metric IDs to compare (e.g., ["revenue", "net_income", "operating_cash_flow"])'),
+    years: z.number().min(1).max(20).optional().default(5).describe('Number of fiscal years (default 5)'),
+  },
+  async ({ company, metrics, years }) => {
+    const result = await executeMultiMetricCore({ company, metrics, years });
+
+    if (!result.success) {
+      let errorText = result.error!.message;
+      if (result.error!.suggestions?.length) {
+        errorText += '\n\nDid you mean:\n' +
+          result.error!.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      if (result.error!.availableMetrics) {
+        errorText += '\n\nAvailable metrics:\n' +
+          result.error!.availableMetrics.map(m => `  ${m.id} — ${m.display_name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const r = result.result!;
+    const data: Record<string, Record<string, number>> = {};
+    for (const metric of r.metrics) {
+      const yearMap = r.data.get(metric.id);
+      if (yearMap) {
+        const yearData: Record<string, number> = {};
+        for (const [yr, value] of yearMap) {
+          yearData[`FY${yr}`] = value;
+        }
+        data[metric.id] = yearData;
+      }
+    }
+
+    const output = {
+      company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
+      metrics: r.metrics,
+      years: r.years,
+      data,
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };

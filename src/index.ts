@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeCompareRatioCore, executeSummaryCore, executeScreenCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeCompareRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
@@ -19,6 +19,7 @@ import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitio
 import { renderRatioTable, renderRatioJson, renderRatioCsv, renderCompareRatioTable, renderCompareRatioJson, renderCompareRatioCsv } from './output/ratio-renderer.js';
 import { renderSummaryTable, renderSummaryJson, renderSummaryTrendTable } from './output/summary-renderer.js';
 import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/screen-renderer.js';
+import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from './output/multi-metric-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -400,6 +401,63 @@ program
       } else {
         console.log('');
         console.log(renderCompareRatioTable(results));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('compare-metrics')
+  .alias('cmpm')
+  .description('Compare multiple metrics for one company side-by-side (e.g., compare-metrics AAPL revenue net_income capex)')
+  .argument('<company>', 'Company ticker or name')
+  .argument('<metrics...>', 'Metric IDs to compare (e.g., revenue net_income operating_cash_flow)')
+  .option('-y, --years <n>', 'Number of years', '5')
+  .option('-j, --json', 'Output as JSON')
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, metricsArgs: string[], options: { years?: string; json?: boolean; csv?: boolean }) => {
+    try {
+      const years = validatePositiveInt(options.years || '5', '--years')!;
+
+      const result = await executeMultiMetricCore({
+        company: companyArg,
+        metrics: metricsArgs,
+        years,
+      });
+
+      if (!result.success) {
+        const err = result.error!;
+        if (err.type === 'metric_not_found') {
+          console.error(chalk.red(err.message));
+          if (err.availableMetrics) {
+            console.error('\nSupported metrics:');
+            for (const m of err.availableMetrics) {
+              console.error(`  ${chalk.cyan(m.id.padEnd(22))} ${m.display_name}`);
+            }
+          }
+        } else if (err.type === 'company_ambiguous') {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of err.suggestions!) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(err.message));
+        }
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(renderMultiMetricJson(result.result!));
+      } else if (options.csv) {
+        console.log(renderMultiMetricCsv(result.result!));
+      } else {
+        console.log('');
+        console.log(renderMultiMetricTable(result.result!));
         console.log('');
       }
     } catch (err) {

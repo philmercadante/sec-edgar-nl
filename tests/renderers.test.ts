@@ -10,7 +10,8 @@ import { renderJson } from '../src/output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from '../src/output/comparison-renderer.js';
 import { renderScreenTable, renderScreenJson, renderScreenCsv } from '../src/output/screen-renderer.js';
 import { padRight, csvEscape } from '../src/output/format-utils.js';
-import type { RatioResult, ScreenResult } from '../src/core/query-engine.js';
+import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from '../src/output/multi-metric-renderer.js';
+import type { RatioResult, ScreenResult, MultiMetricResult } from '../src/core/query-engine.js';
 import type { QueryResult, MetricDefinition } from '../src/core/types.js';
 
 const mockMetric: MetricDefinition = {
@@ -793,5 +794,149 @@ describe('renderInsiderCsv', () => {
     const csv = renderInsiderCsv(empty);
     const lines = csv.split('\n');
     expect(lines).toHaveLength(1);
+  });
+});
+
+// ── Multi-metric renderer tests ─────────────────────────────────────
+
+const mockMultiMetric: MultiMetricResult = {
+  company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+  metrics: [
+    { id: 'revenue', display_name: 'Revenue', unit_type: 'currency' },
+    { id: 'net_income', display_name: 'Net Income', unit_type: 'currency' },
+    { id: 'shares_outstanding', display_name: 'Shares Outstanding', unit_type: 'shares' },
+  ],
+  years: [2022, 2023, 2024],
+  data: new Map([
+    ['revenue', new Map([[2022, 394e9], [2023, 383e9], [2024, 391e9]])],
+    ['net_income', new Map([[2022, 99.8e9], [2023, 97e9], [2024, 93.7e9]])],
+    ['shares_outstanding', new Map([[2022, 16.3e9], [2023, 15.7e9], [2024, 15.4e9]])],
+  ]),
+};
+
+describe('renderMultiMetricTable', () => {
+  it('includes company name and header', () => {
+    const output = renderMultiMetricTable(mockMultiMetric);
+    expect(output).toContain('Apple Inc.');
+    expect(output).toContain('Multi-Metric Comparison');
+  });
+
+  it('includes all metric names', () => {
+    const output = renderMultiMetricTable(mockMultiMetric);
+    expect(output).toContain('Revenue');
+    expect(output).toContain('Net Income');
+    expect(output).toContain('Shares Outstanding');
+  });
+
+  it('includes fiscal year headers', () => {
+    const output = renderMultiMetricTable(mockMultiMetric);
+    expect(output).toContain('FY2022');
+    expect(output).toContain('FY2023');
+    expect(output).toContain('FY2024');
+  });
+
+  it('includes Trend column with 3+ years', () => {
+    const output = renderMultiMetricTable(mockMultiMetric);
+    expect(output).toContain('Trend');
+  });
+
+  it('omits Trend column with fewer than 3 years', () => {
+    const twoYears: MultiMetricResult = {
+      ...mockMultiMetric,
+      years: [2023, 2024],
+      data: new Map([
+        ['revenue', new Map([[2023, 383e9], [2024, 391e9]])],
+        ['net_income', new Map([[2023, 97e9], [2024, 93.7e9]])],
+        ['shares_outstanding', new Map([[2023, 15.7e9], [2024, 15.4e9]])],
+      ]),
+    };
+    const output = renderMultiMetricTable(twoYears);
+    expect(output).not.toContain('Trend');
+  });
+
+  it('handles empty data gracefully', () => {
+    const empty: MultiMetricResult = {
+      ...mockMultiMetric,
+      metrics: [],
+      years: [],
+      data: new Map(),
+    };
+    const output = renderMultiMetricTable(empty);
+    expect(output).toContain('No data found');
+  });
+
+  it('formats currency and shares differently', () => {
+    const output = renderMultiMetricTable(mockMultiMetric);
+    // Currency has $ prefix, shares don't
+    expect(output).toContain('$');
+    expect(output).toContain('B'); // Both currency and shares in billions
+  });
+});
+
+describe('renderMultiMetricJson', () => {
+  it('produces valid JSON with correct structure', () => {
+    const json = JSON.parse(renderMultiMetricJson(mockMultiMetric));
+    expect(json.company.ticker).toBe('AAPL');
+    expect(json.metrics).toHaveLength(3);
+    expect(json.years).toEqual([2022, 2023, 2024]);
+  });
+
+  it('includes data keyed by metric ID', () => {
+    const json = JSON.parse(renderMultiMetricJson(mockMultiMetric));
+    expect(json.data.revenue).toBeDefined();
+    expect(json.data.net_income).toBeDefined();
+    expect(json.data.revenue.FY2024).toBe(391e9);
+  });
+
+  it('includes metric metadata', () => {
+    const json = JSON.parse(renderMultiMetricJson(mockMultiMetric));
+    expect(json.metrics[0].id).toBe('revenue');
+    expect(json.metrics[0].display_name).toBe('Revenue');
+    expect(json.metrics[0].unit_type).toBe('currency');
+  });
+});
+
+describe('renderMultiMetricCsv', () => {
+  it('outputs CSV with header and metric rows', () => {
+    const csv = renderMultiMetricCsv(mockMultiMetric);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('metric_id,display_name,FY2022,FY2023,FY2024');
+    expect(lines).toHaveLength(4); // header + 3 metrics
+  });
+
+  it('includes metric values', () => {
+    const csv = renderMultiMetricCsv(mockMultiMetric);
+    expect(csv).toContain('revenue,Revenue,');
+    expect(csv).toContain('391000000000');
+  });
+
+  it('handles missing values with empty cells', () => {
+    const sparse: MultiMetricResult = {
+      ...mockMultiMetric,
+      data: new Map([
+        ['revenue', new Map([[2022, 394e9], [2024, 391e9]])], // missing 2023
+        ['net_income', new Map([[2022, 99.8e9], [2023, 97e9], [2024, 93.7e9]])],
+        ['shares_outstanding', new Map()], // missing all
+      ]),
+    };
+    const csv = renderMultiMetricCsv(sparse);
+    const lines = csv.split('\n');
+    // Revenue row should have empty FY2023
+    const revenueLine = lines.find(l => l.startsWith('revenue,'))!;
+    expect(revenueLine).toBe('revenue,Revenue,394000000000,,391000000000');
+    // Shares row should be all empty
+    const sharesLine = lines.find(l => l.startsWith('shares_outstanding,'))!;
+    expect(sharesLine).toBe('shares_outstanding,Shares Outstanding,,,');
+  });
+
+  it('escapes display names with commas', () => {
+    const withComma: MultiMetricResult = {
+      company: mockMultiMetric.company,
+      metrics: [{ id: 'test', display_name: 'Revenue, Net', unit_type: 'currency' }],
+      years: [2024],
+      data: new Map([['test', new Map([[2024, 100]])]]),
+    };
+    const csv = renderMultiMetricCsv(withComma);
+    expect(csv).toContain('"Revenue, Net"');
   });
 });

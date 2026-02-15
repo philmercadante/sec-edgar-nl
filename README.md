@@ -79,6 +79,7 @@ Computed from the base metrics — no additional API calls:
 - **Natural language queries** — "Apple's R&D spending over the last 5 years"
 - **Company screening** — Find all companies with revenue > $100B using Frames API
 - **Multi-company comparison** — Compare metrics or ratios across AAPL, MSFT, GOOGL
+- **Multi-metric comparison** — Compare revenue, net income, cash flow side-by-side for one company
 - **Full-text filing search** — Search all EDGAR filings by content ("artificial intelligence", "tariff risk")
 - **Company profile** — SIC code, industry, fiscal year end, filing history
 - **Insider trading** — Form 4 buy/sell activity with bullish/bearish signals
@@ -153,6 +154,15 @@ sec-edgar-nl ratios  # List all available ratios
 # Compare a ratio across companies
 sec-edgar-nl compare-ratio AAPL MSFT GOOGL net_margin
 sec-edgar-nl compare-ratio AAPL MSFT debt_to_equity --csv
+```
+
+### Compare metrics for one company
+
+```bash
+sec-edgar-nl compare-metrics AAPL revenue net_income operating_cash_flow
+sec-edgar-nl compare-metrics MSFT revenue rd_expense sbc --years 10
+sec-edgar-nl compare-metrics NVDA revenue net_income capex --json
+sec-edgar-nl compare-metrics AAPL revenue net_income --csv
 ```
 
 ### Financial summary
@@ -240,12 +250,13 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-### Available MCP Tools (13)
+### Available MCP Tools (14)
 
 | Tool | Description |
 |------|-------------|
 | `query_financial_metric` | Fetch a metric for a company |
 | `compare_companies` | Compare a metric across companies |
+| `compare_metrics` | Compare multiple metrics for one company |
 | `compare_ratios` | Compare a ratio across companies |
 | `screen_companies` | Screen all companies by a metric (Frames API) |
 | `query_financial_ratio` | Compute a derived ratio |
@@ -302,6 +313,7 @@ sec-edgar-nl/
       filing-renderer.ts     # Filing timeline output
       insider-renderer.ts    # Insider trading output
       screen-renderer.ts     # Company screening output
+      multi-metric-renderer.ts # Multi-metric comparison output
 ```
 
 ### Key Design Decisions
@@ -316,7 +328,7 @@ sec-edgar-nl/
 ## Testing
 
 ```bash
-npm test           # Run all tests (170 tests)
+npm test           # Run all tests (213 tests)
 npm run test:watch # Watch mode
 ```
 

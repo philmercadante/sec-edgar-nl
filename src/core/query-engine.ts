@@ -665,6 +665,142 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
   };
 }
 
+// ── Multi-Metric Execution ──────────────────────────────────────────
+
+export interface MultiMetricParams {
+  company: string;
+  metrics: string[];
+  years?: number;
+}
+
+export interface MultiMetricDataPoint {
+  fiscal_year: number;
+  values: Map<string, number>;
+}
+
+export interface MultiMetricResult {
+  company: CompanyInfo;
+  metrics: Array<{ id: string; display_name: string; unit_type: string }>;
+  years: number[];
+  data: Map<string, Map<number, number>>; // metric_id -> fiscal_year -> value
+}
+
+export interface MultiMetricEngineResult {
+  success: boolean;
+  result?: MultiMetricResult;
+  error?: {
+    type: 'company_not_found' | 'company_ambiguous' | 'metric_not_found' | 'no_data' | 'api_error';
+    message: string;
+    suggestions?: Array<{ ticker: string; name: string }>;
+    availableMetrics?: Array<{ id: string; display_name: string }>;
+  };
+}
+
+/**
+ * Fetch multiple metrics for one company across years.
+ * Efficiently uses cache — first metric call loads CompanyFacts, rest are cache hits.
+ */
+export async function executeMultiMetricCore(params: MultiMetricParams): Promise<MultiMetricEngineResult> {
+  const { company: companyQuery, metrics: metricQueries, years = 5 } = params;
+
+  // Resolve all metrics
+  const resolvedMetrics: MetricDefinition[] = [];
+  for (const mq of metricQueries) {
+    const metric = getMetricDefinition(mq) ?? findMetricByName(mq);
+    if (!metric) {
+      return {
+        success: false,
+        error: {
+          type: 'metric_not_found',
+          message: `Could not identify metric: "${mq}"`,
+          availableMetrics: METRIC_DEFINITIONS.map(m => ({ id: m.id, display_name: m.display_name })),
+        },
+      };
+    }
+    resolvedMetrics.push(metric);
+  }
+
+  // Resolve company
+  const resolved = await resolveCompanyWithSuggestions(companyQuery);
+  if (!resolved.company) {
+    if (resolved.suggestions.length > 0) {
+      return {
+        success: false,
+        error: {
+          type: 'company_ambiguous',
+          message: `Ambiguous company: "${companyQuery}"`,
+          suggestions: resolved.suggestions.map(s => ({ ticker: s.ticker, name: s.name })),
+        },
+      };
+    }
+    return {
+      success: false,
+      error: {
+        type: 'company_not_found',
+        message: `Could not find company: "${companyQuery}". Try using a ticker symbol.`,
+      },
+    };
+  }
+
+  const company = resolved.company;
+
+  // Fetch all metrics (first call hits SEC API, rest are cache hits)
+  const metricResults = await Promise.all(
+    resolvedMetrics.map(async (metric) => {
+      try {
+        const result = await fetchMetricData(company, metric, years);
+        return { metric, dataPoints: result.dataPoints };
+      } catch {
+        return { metric, dataPoints: [] };
+      }
+    })
+  );
+
+  // Collect all years and build data map
+  const allYears = new Set<number>();
+  const data = new Map<string, Map<number, number>>();
+
+  for (const { metric, dataPoints } of metricResults) {
+    const yearMap = new Map<number, number>();
+    for (const dp of dataPoints) {
+      yearMap.set(dp.fiscal_year, dp.value);
+      allYears.add(dp.fiscal_year);
+    }
+    data.set(metric.id, yearMap);
+  }
+
+  if (allYears.size === 0) {
+    return {
+      success: false,
+      error: {
+        type: 'no_data',
+        message: `No data found for ${company.name} for any of the requested metrics`,
+      },
+    };
+  }
+
+  const companyInfo: CompanyInfo = {
+    cik: company.cik,
+    ticker: company.ticker,
+    name: company.name,
+    fiscal_year_end_month: 0,
+  };
+
+  return {
+    success: true,
+    result: {
+      company: companyInfo,
+      metrics: resolvedMetrics.map(m => ({
+        id: m.id,
+        display_name: m.display_name,
+        unit_type: m.unit_type,
+      })),
+      years: [...allYears].sort((a, b) => a - b),
+      data,
+    },
+  };
+}
+
 // ── Screen Execution ──────────────────────────────────────────────────
 
 export interface ScreenParams {
