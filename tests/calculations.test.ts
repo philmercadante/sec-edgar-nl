@@ -115,4 +115,14 @@ describe('calculateGrowth', () => {
     expect(result.cagr).toBeNull();
     expect(result.cagr_years).toBe(0);
   });
+
+  it('returns null CAGR for extreme values that produce Infinity', () => {
+    // Extremely small first value could produce Infinity CAGR
+    const data = [
+      makeDataPoint(2020, 1e-300),
+      makeDataPoint(2024, 1e300),
+    ];
+    const result = calculateGrowth(data);
+    expect(result.cagr).toBeNull();
+  });
 });

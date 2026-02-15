@@ -30,6 +30,7 @@ function getDb(): Database.Database {
   try {
     db = new Database(CACHE_DB);
     db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 3000');
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS http_cache (
@@ -61,6 +62,7 @@ function getDb(): Database.Database {
 
     db = new Database(CACHE_DB);
     db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 3000');
     db.exec(`
       CREATE TABLE IF NOT EXISTS http_cache (
         url_hash TEXT PRIMARY KEY,

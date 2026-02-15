@@ -203,4 +203,83 @@ describe('parseForm4Xml', () => {
     expect(txns[0].insider.is_officer).toBe(false);
     expect(txns[0].insider.officer_title).toBe('');
   });
+
+  it('handles all-zeros CIK gracefully', () => {
+    const xml = `<?xml version="1.0"?>
+<ownershipDocument>
+  <reportingOwner>
+    <reportingOwnerId>
+      <rptOwnerCik>0000000000</rptOwnerCik>
+      <rptOwnerName>ZERO CIK PERSON</rptOwnerName>
+    </reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>1</isDirector>
+      <isOfficer>0</isOfficer>
+      <isTenPercentOwner>0</isTenPercentOwner>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionDate><value>2025-12-01</value></transactionDate>
+      <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>1000</value></transactionShares>
+        <transactionPricePerShare><value>10.00</value></transactionPricePerShare>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </transactionAmounts>
+      <postTransactionAmounts>
+        <sharesOwnedFollowingTransaction><value>1000</value></sharesOwnedFollowingTransaction>
+      </postTransactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>`;
+    const txns = parseForm4Xml(xml, '0006-23-456789', '2025-12-02');
+    expect(txns).toHaveLength(1);
+    expect(txns[0].insider.cik).toBe('0'); // Should not be empty string
+  });
+
+  it('parses nested value tags with whitespace correctly', () => {
+    // Tests the extractNestedValue regex with multiline content
+    const xml = `<?xml version="1.0"?>
+<ownershipDocument>
+  <reportingOwner>
+    <reportingOwnerId>
+      <rptOwnerCik>0001234567</rptOwnerCik>
+      <rptOwnerName>WHITESPACE TEST</rptOwnerName>
+    </reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>1</isDirector>
+      <isOfficer>0</isOfficer>
+      <isTenPercentOwner>0</isTenPercentOwner>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionDate><value>2025-12-01</value></transactionDate>
+      <transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares>
+          <value>2500</value>
+        </transactionShares>
+        <transactionPricePerShare>
+          <value>99.99</value>
+        </transactionPricePerShare>
+        <transactionAcquiredDisposedCode>
+          <value>D</value>
+        </transactionAcquiredDisposedCode>
+      </transactionAmounts>
+      <postTransactionAmounts>
+        <sharesOwnedFollowingTransaction>
+          <value>7500</value>
+        </sharesOwnedFollowingTransaction>
+      </postTransactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>`;
+    const txns = parseForm4Xml(xml, '0007-23-456789', '2025-12-02');
+    expect(txns).toHaveLength(1);
+    expect(txns[0].shares).toBe(2500);
+    expect(txns[0].price_per_share).toBe(99.99);
+    expect(txns[0].shares_owned_after).toBe(7500);
+  });
 });

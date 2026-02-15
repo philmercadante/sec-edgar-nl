@@ -35,8 +35,8 @@ export function calculateGrowth(dataPoints: DataPoint[]): Calculations {
     const last = dataPoints[dataPoints.length - 1].value;
 
     if (first > 0 && last > 0) {
-      cagr = (Math.pow(last / first, 1 / cagr_years) - 1) * 100;
-      cagr = Math.round(cagr * 10) / 10;
+      const raw = (Math.pow(last / first, 1 / cagr_years) - 1) * 100;
+      cagr = isFinite(raw) ? Math.round(raw * 10) / 10 : null;
     }
   }
 

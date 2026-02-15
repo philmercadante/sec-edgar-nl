@@ -322,6 +322,7 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
   // Find overlapping years
   const allYears = [...new Set([...numByYear.keys(), ...denByYear.keys()])].sort((a, b) => a - b);
   const dataPoints: RatioDataPoint[] = [];
+  let divByZeroCount = 0;
 
   for (const year of allYears) {
     const numVal = numByYear.get(year);
@@ -332,7 +333,10 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
     if (ratio.operation === 'subtract') {
       value = numVal - denVal;
     } else {
-      if (denVal === 0) continue; // Skip division by zero
+      if (denVal === 0) {
+        divByZeroCount++;
+        continue;
+      }
       value = numVal / denVal;
     }
 
@@ -345,11 +349,14 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
   }
 
   if (dataPoints.length === 0) {
+    const reason = divByZeroCount > 0
+      ? `${denMetric.display_name} was zero in all available years — cannot compute ${ratio.display_name}.`
+      : `No overlapping data found for ${ratio.display_name}`;
     return {
       success: false,
       error: {
         type: 'no_data',
-        message: `No overlapping data found for ${ratio.display_name}`,
+        message: reason,
       },
     };
   }
@@ -459,7 +466,11 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
     const prior = dataPoints.find(dp => dp.fiscal_year === fiscalYear - 1);
     let yoyChange: number | undefined;
     if (prior && prior.value !== 0) {
-      yoyChange = Math.round(((current.value - prior.value) / Math.abs(prior.value)) * 1000) / 10;
+      // Skip sign flips (profit to loss) — percentage change is meaningless
+      const signFlip = (prior.value > 0 && current.value < 0) || (prior.value < 0 && current.value > 0);
+      if (!signFlip) {
+        yoyChange = Math.round(((current.value - prior.value) / Math.abs(prior.value)) * 1000) / 10;
+      }
     }
 
     metrics.push({

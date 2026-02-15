@@ -181,7 +181,7 @@ function extractInsiderInfo(xml: string): InsiderInfo | null {
   const officerTitle = extractTagValue(ownerBlock[1], 'officerTitle') || '';
 
   return {
-    cik: cik.replace(/^0+/, ''), // Strip leading zeros
+    cik: cik.replace(/^0+/, '') || '0', // Strip leading zeros, keep at least '0'
     name: formatName(name),
     is_director: isDirector,
     is_officer: isOfficer,
@@ -245,7 +245,7 @@ function extractTagValue(xml: string, tag: string): string | null {
 }
 
 function extractNestedValue(xml: string, outerTag: string): string | null {
-  const outerMatch = xml.match(new RegExp(`<${outerTag}>([\\\s\\\S]*?)</${outerTag}>`, 'i'));
+  const outerMatch = xml.match(new RegExp(`<${outerTag}>([\\s\\S]*?)</${outerTag}>`, 'i'));
   if (!outerMatch) return null;
   // Try to get inner <value> tag first
   const valueMatch = outerMatch[1].match(/<value>([^<]*)<\/value>/i);
