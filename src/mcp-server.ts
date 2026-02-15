@@ -339,6 +339,76 @@ server.tool(
   }
 );
 
+server.tool(
+  'explore_xbrl_concepts',
+  'Explore all available XBRL concepts for a company from SEC EDGAR. Useful for discovering what financial data exists beyond the predefined metrics.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+    search: z.string().optional().describe('Filter concepts by name, label, or description'),
+    limit: z.number().min(1).max(200).optional().default(30).describe('Max concepts to return (default 30)'),
+  },
+  async ({ company, search, limit }) => {
+    const resolved = await resolveCompanyWithSuggestions(company);
+    if (!resolved.company) {
+      let errorText = `Could not find company: "${company}"`;
+      if (resolved.suggestions.length > 0) {
+        errorText = `Ambiguous company: "${company}"\n\nDid you mean:\n` +
+          resolved.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const { getCompanyFacts } = await import('./core/sec-client.js');
+    const facts = await getCompanyFacts(resolved.company.cik);
+    const searchLower = search?.toLowerCase();
+
+    const concepts: Array<{
+      taxonomy: string; concept: string; label: string;
+      units: string[]; fact_count: number; year_range: string;
+    }> = [];
+
+    for (const [taxonomy, taxConcepts] of Object.entries(facts.facts)) {
+      for (const [concept, data] of Object.entries(taxConcepts)) {
+        if (searchLower) {
+          const matchable = `${concept} ${data.label} ${data.description}`.toLowerCase();
+          if (!matchable.includes(searchLower)) continue;
+        }
+
+        let factCount = 0;
+        let minYear: number | null = null;
+        let maxYear: number | null = null;
+
+        for (const unitFacts of Object.values(data.units)) {
+          factCount += unitFacts.length;
+          for (const f of unitFacts) {
+            if (f.fy) {
+              if (minYear === null || f.fy < minYear) minYear = f.fy;
+              if (maxYear === null || f.fy > maxYear) maxYear = f.fy;
+            }
+          }
+        }
+
+        concepts.push({
+          taxonomy, concept, label: data.label,
+          units: Object.keys(data.units), fact_count: factCount,
+          year_range: minYear && maxYear ? `FY${minYear}-${maxYear}` : '',
+        });
+      }
+    }
+
+    concepts.sort((a, b) => b.fact_count - a.fact_count);
+    const shown = concepts.slice(0, limit);
+
+    const output = {
+      company: { cik: resolved.company.cik, ticker: resolved.company.ticker, name: resolved.company.name },
+      total_concepts: concepts.length,
+      concepts: shown,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
 // ── Resources ──────────────────────────────────────────────────────────
 
 server.resource(

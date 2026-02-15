@@ -13,7 +13,7 @@ import { METRIC_DEFINITIONS, findMetricByName } from './processing/metric-defini
 import { fetchInsiderActivity } from './processing/insider-processor.js';
 import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
-import { getCompanySubmissions } from './core/sec-client.js';
+import { getCompanySubmissions, getCompanyFacts } from './core/sec-client.js';
 import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
@@ -470,6 +470,106 @@ program
       } else {
         console.log('');
         console.log(renderFilingTable(result));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('concepts')
+  .description('Explore XBRL concepts available for a company from SEC EDGAR')
+  .argument('<company>', 'Company ticker or name')
+  .option('-s, --search <term>', 'Filter concepts by name or label')
+  .option('-n, --limit <n>', 'Maximum concepts to show', '50')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (companyArg: string, options: { search?: string; limit?: string; json?: boolean }) => {
+    try {
+      const limit = validatePositiveInt(options.limit || '50', '--limit')!;
+
+      const resolved = await resolveCompanyWithSuggestions(companyArg);
+      if (!resolved.company) {
+        if (resolved.suggestions.length > 0) {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of resolved.suggestions) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(`Could not find company: "${companyArg}"`));
+        }
+        process.exit(1);
+      }
+
+      const facts = await getCompanyFacts(resolved.company.cik);
+      const searchLower = options.search?.toLowerCase();
+
+      interface ConceptInfo {
+        taxonomy: string;
+        concept: string;
+        label: string;
+        units: string[];
+        fact_count: number;
+        min_year: number | null;
+        max_year: number | null;
+      }
+
+      const concepts: ConceptInfo[] = [];
+
+      for (const [taxonomy, taxConcepts] of Object.entries(facts.facts)) {
+        for (const [concept, data] of Object.entries(taxConcepts)) {
+          // Apply search filter
+          if (searchLower) {
+            const matchable = `${concept} ${data.label} ${data.description}`.toLowerCase();
+            if (!matchable.includes(searchLower)) continue;
+          }
+
+          const units = Object.keys(data.units);
+          let factCount = 0;
+          let minYear: number | null = null;
+          let maxYear: number | null = null;
+
+          for (const unitFacts of Object.values(data.units)) {
+            factCount += unitFacts.length;
+            for (const f of unitFacts) {
+              if (f.fy) {
+                if (minYear === null || f.fy < minYear) minYear = f.fy;
+                if (maxYear === null || f.fy > maxYear) maxYear = f.fy;
+              }
+            }
+          }
+
+          concepts.push({ taxonomy, concept, label: data.label, units, fact_count: factCount, min_year: minYear, max_year: maxYear });
+        }
+      }
+
+      // Sort by fact count descending (most data first)
+      concepts.sort((a, b) => b.fact_count - a.fact_count);
+      const shown = concepts.slice(0, limit);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          company: { cik: resolved.company.cik, ticker: resolved.company.ticker, name: resolved.company.name },
+          total_concepts: concepts.length,
+          concepts: shown,
+        }, null, 2));
+      } else {
+        const header = `${resolved.company.name} (${resolved.company.ticker}) — XBRL Concepts`;
+        console.log('');
+        console.log(chalk.bold(header));
+        console.log(chalk.dim('='.repeat(header.length)));
+        if (searchLower) console.log(chalk.dim(`  Filter: "${options.search}"`));
+        console.log(chalk.dim(`  ${concepts.length} concepts found${shown.length < concepts.length ? `, showing top ${shown.length}` : ''}`));
+        console.log('');
+
+        for (const c of shown) {
+          const yearRange = c.min_year && c.max_year ? `FY${c.min_year}-${c.max_year}` : '';
+          console.log(`  ${chalk.cyan(c.concept)}`);
+          console.log(`    ${chalk.dim(c.label)} | ${c.taxonomy} | ${c.units.join(', ')} | ${c.fact_count} facts | ${yearRange}`);
+        }
         console.log('');
       }
     } catch (err) {
