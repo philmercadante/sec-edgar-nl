@@ -90,7 +90,8 @@ function extractCompany(input: string): string {
     .replace(/^(?:show\s+me|what\s+is|what\s+are|how\s+has|how\s+have|get|fetch|find)\s+/i, '')
     .replace(/\s*(?:over\s+the\s+)?(?:last|past|previous)\s+\d+\s*(?:fiscal\s+)?(?:years?|quarters?)\s*/i, '')
     .replace(/\bquarterly\b/gi, '')
-    .replace(/[''`]/g, "'");
+    .replace(/[\u2018\u2019\u201A\u201B\u0060\u00B4]/g, "'")
+    .replace(/^'+/, ''); // strip leading stray quotes
 
   // Try "Company's metric" pattern
   const possessiveMatch = cleaned.match(/^([A-Za-z][A-Za-z\s.&]*?)'s\s/i);
