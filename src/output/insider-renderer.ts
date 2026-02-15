@@ -5,6 +5,7 @@
 import chalk from 'chalk';
 import type { InsiderActivityResult, InsiderTransaction } from '../core/types.js';
 import { TRANSACTION_CODE_LABELS } from '../processing/insider-processor.js';
+import { padRight, csvEscape } from './format-utils.js';
 
 export function renderInsiderTable(result: InsiderActivityResult): string {
   const { company, period_days, transactions, summary, provenance } = result;
@@ -96,6 +97,30 @@ export function renderInsiderTable(result: InsiderActivityResult): string {
   return lines.join('\n');
 }
 
+export function renderInsiderCsv(result: InsiderActivityResult): string {
+  const lines: string[] = [];
+  lines.push('date,insider,title,type,direction,shares,price,value,shares_after,filing_accession');
+
+  for (const t of result.transactions) {
+    const title = t.insider.officer_title || (t.insider.is_director ? 'Director' : '10% Owner');
+    const typeLabel = TRANSACTION_CODE_LABELS[t.transaction_code] || t.transaction_code;
+    lines.push([
+      t.transaction_date,
+      csvEscape(t.insider.name),
+      csvEscape(title),
+      typeLabel,
+      t.transaction_type,
+      t.shares.toString(),
+      t.price_per_share?.toString() ?? '',
+      t.total_value?.toString() ?? '',
+      t.shares_owned_after.toString(),
+      t.filing_accession,
+    ].join(','));
+  }
+
+  return lines.join('\n');
+}
+
 export function renderInsiderJson(result: InsiderActivityResult): string {
   return JSON.stringify({
     company: {
@@ -143,12 +168,6 @@ function formatNumber(n: number): string {
 function formatShares(n: number): string {
   const sign = n >= 0 ? '+' : '';
   return `${sign}${n.toLocaleString('en-US')}`;
-}
-
-function padRight(str: string, len: number): string {
-  const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, len - stripped.length);
-  return str + ' '.repeat(padding);
 }
 
 function truncate(str: string, maxLen: number): string {

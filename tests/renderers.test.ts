@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { formatCurrency, formatShareCount, sparkline, renderTable } from '../src/output/table-renderer.js';
 import { renderRatioJson, renderRatioCsv, renderRatioTable, renderCompareRatioTable, renderCompareRatioCsv } from '../src/output/ratio-renderer.js';
-import { renderFilingJson, type FilingListResult } from '../src/output/filing-renderer.js';
+import { renderFilingJson, renderFilingCsv, type FilingListResult } from '../src/output/filing-renderer.js';
+import { renderInsiderCsv } from '../src/output/insider-renderer.js';
+import type { InsiderActivityResult } from '../src/core/types.js';
 import { renderSummaryJson, renderSummaryTable, renderSummaryTrendTable, type SummaryResult } from '../src/output/summary-renderer.js';
 import { renderCsv, renderComparisonCsv } from '../src/output/csv-renderer.js';
 import { renderJson } from '../src/output/json-renderer.js';
@@ -659,5 +661,137 @@ describe('renderSummaryTrendTable', () => {
     const output = renderSummaryTrendTable(noTrend);
     // Falls back to renderSummaryTable format
     expect(output).toContain('Financial Summary');
+  });
+});
+
+// ── Filing CSV renderer tests ──────────────────────────────────────
+
+describe('renderFilingCsv', () => {
+  const mockFilings: FilingListResult = {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    filings: [
+      {
+        form_type: '10-K',
+        filing_date: '2024-11-01',
+        description: 'Annual Report',
+        accession_number: '0000320193-24-000001',
+        edgar_url: 'https://example.com/filing1',
+      },
+      {
+        form_type: '8-K',
+        filing_date: '2024-10-15',
+        description: 'Current report, items 2.02 and 9.01',
+        accession_number: '0000320193-24-000002',
+        edgar_url: 'https://example.com/filing2',
+      },
+    ],
+    total_available: 100,
+  };
+
+  it('outputs CSV with header and data rows', () => {
+    const csv = renderFilingCsv(mockFilings);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('form_type,filing_date,description,accession_number,edgar_url');
+    expect(lines).toHaveLength(3);
+  });
+
+  it('includes form type and accession number', () => {
+    const csv = renderFilingCsv(mockFilings);
+    expect(csv).toContain('10-K');
+    expect(csv).toContain('0000320193-24-000001');
+  });
+
+  it('handles empty filings', () => {
+    const csv = renderFilingCsv({ ...mockFilings, filings: [] });
+    const lines = csv.split('\n');
+    expect(lines).toHaveLength(1); // Just the header
+  });
+
+  it('escapes descriptions with commas', () => {
+    const withComma: FilingListResult = {
+      ...mockFilings,
+      filings: [{
+        form_type: '8-K',
+        filing_date: '2024-10-15',
+        description: 'Current report, items 2.02 and 9.01',
+        accession_number: 'accn',
+        edgar_url: 'url',
+      }],
+    };
+    const csv = renderFilingCsv(withComma);
+    expect(csv).toContain('"Current report, items 2.02 and 9.01"');
+  });
+});
+
+// ── Insider CSV renderer tests ──────────────────────────────────────
+
+describe('renderInsiderCsv', () => {
+  const mockInsider: InsiderActivityResult = {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    period_days: 90,
+    transactions: [
+      {
+        insider: { cik: '1', name: 'Tim Cook', is_director: false, is_officer: true, is_ten_percent_owner: false, officer_title: 'CEO' },
+        transaction_date: '2024-11-01',
+        transaction_code: 'S',
+        transaction_type: 'disposition',
+        shares: 50000,
+        price_per_share: 225.50,
+        total_value: 11275000,
+        shares_owned_after: 3000000,
+        filing_date: '2024-11-03',
+        filing_accession: '0000320193-24-000010',
+      },
+      {
+        insider: { cik: '2', name: 'O\'Brien, Katherine', is_director: true, is_officer: false, is_ten_percent_owner: false, officer_title: '' },
+        transaction_date: '2024-10-15',
+        transaction_code: 'P',
+        transaction_type: 'acquisition',
+        shares: 1000,
+        price_per_share: 220.00,
+        total_value: 220000,
+        shares_owned_after: 5000,
+        filing_date: '2024-10-17',
+        filing_accession: '0000320193-24-000011',
+      },
+    ],
+    summary: {
+      total_buys: 1,
+      total_sells: 1,
+      buy_shares: 1000,
+      sell_shares: 50000,
+      buy_value: 220000,
+      sell_value: 11275000,
+      net_shares: -49000,
+      unique_insiders: 2,
+      signal: 'bearish',
+    },
+    provenance: {
+      filing_count: 2,
+      filing_date_range: ['2024-10-17', '2024-11-03'],
+      accession_numbers: ['accn1', 'accn2'],
+    },
+  };
+
+  it('outputs CSV with header and data rows', () => {
+    const csv = renderInsiderCsv(mockInsider);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('date,insider,title,type,direction,shares,price,value,shares_after,filing_accession');
+    expect(lines).toHaveLength(3);
+  });
+
+  it('includes transaction details', () => {
+    const csv = renderInsiderCsv(mockInsider);
+    expect(csv).toContain('Tim Cook');
+    expect(csv).toContain('CEO');
+    expect(csv).toContain('225.5');
+    expect(csv).toContain('disposition');
+  });
+
+  it('handles empty transactions', () => {
+    const empty = { ...mockInsider, transactions: [] };
+    const csv = renderInsiderCsv(empty);
+    const lines = csv.split('\n');
+    expect(lines).toHaveLength(1);
   });
 });

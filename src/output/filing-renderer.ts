@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { CompanyInfo } from '../core/types.js';
+import { padRight, csvEscape } from './format-utils.js';
 
 export interface Filing {
   form_type: string;
@@ -46,6 +47,23 @@ export function renderFilingTable(result: FilingListResult): string {
   return lines.join('\n');
 }
 
+export function renderFilingCsv(result: FilingListResult): string {
+  const lines: string[] = [];
+  lines.push('form_type,filing_date,description,accession_number,edgar_url');
+
+  for (const f of result.filings) {
+    lines.push([
+      f.form_type,
+      f.filing_date,
+      csvEscape(f.description),
+      f.accession_number,
+      f.edgar_url,
+    ].join(','));
+  }
+
+  return lines.join('\n');
+}
+
 export function renderFilingJson(result: FilingListResult): string {
   return JSON.stringify({
     company: {
@@ -67,8 +85,3 @@ function colorForm(form: string): string {
   return form;
 }
 
-function padRight(str: string, len: number): string {
-  const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, len - stripped.length);
-  return str + ' '.repeat(padding);
-}

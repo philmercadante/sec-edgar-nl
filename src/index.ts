@@ -11,10 +11,10 @@ import { renderCsv, renderComparisonCsv } from './output/csv-renderer.js';
 import { closeCache, clearCache, getCacheStats, addToWatchlist, removeFromWatchlist, getWatchlist, updateWatchlistEntry, clearWatchlist } from './core/cache.js';
 import { METRIC_DEFINITIONS, findMetricByName, getMetricDefinition } from './processing/metric-definitions.js';
 import { fetchInsiderActivity } from './processing/insider-processor.js';
-import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
+import { renderInsiderTable, renderInsiderJson, renderInsiderCsv } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
 import { getCompanySubmissions, getCompanyFacts, searchFilings } from './core/sec-client.js';
-import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
+import { renderFilingTable, renderFilingJson, renderFilingCsv, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv, renderCompareRatioTable, renderCompareRatioJson, renderCompareRatioCsv } from './output/ratio-renderer.js';
 import { renderSummaryTable, renderSummaryJson, renderSummaryTrendTable } from './output/summary-renderer.js';
@@ -467,7 +467,8 @@ program
   .argument('<company>', 'Company ticker or name')
   .option('-d, --days <n>', 'Number of days to look back', '90')
   .option('-j, --json', 'Output as JSON')
-  .action(async (companyArg: string, options: { days?: string; json?: boolean }) => {
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, options: { days?: string; json?: boolean; csv?: boolean }) => {
     try {
       const days = validatePositiveInt(options.days || '90', '--days')!;
 
@@ -488,6 +489,8 @@ program
 
       if (options.json) {
         console.log(renderInsiderJson(result));
+      } else if (options.csv) {
+        console.log(renderInsiderCsv(result));
       } else {
         console.log('');
         console.log(renderInsiderTable(result));
@@ -509,7 +512,8 @@ program
   .option('-f, --form <type>', 'Filter by form type (e.g., 10-K, 10-Q, 8-K, 4)')
   .option('-n, --limit <n>', 'Number of filings to show', '20')
   .option('-j, --json', 'Output as JSON')
-  .action(async (companyArg: string, options: { form?: string; limit?: string; json?: boolean }) => {
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, options: { form?: string; limit?: string; json?: boolean; csv?: boolean }) => {
     try {
       const limit = validatePositiveInt(options.limit || '20', '--limit')!;
 
@@ -558,6 +562,8 @@ program
 
       if (options.json) {
         console.log(renderFilingJson(result));
+      } else if (options.csv) {
+        console.log(renderFilingCsv(result));
       } else {
         console.log('');
         console.log(renderFilingTable(result));
