@@ -67,9 +67,18 @@ export function renderTable(result: QueryResult): string {
 
   lines.push('');
 
+  // Sparkline + CAGR (when we have 3+ data points)
+  if (data_points.length >= 3) {
+    const spark = sparkline(data_points.map(dp => dp.value));
+    lines.push(`  Trend: ${spark}`);
+  }
+
   // CAGR (annual only)
   if (!isQuarterly && calculations.cagr != null) {
     lines.push(`  ${calculations.cagr_years}-Year CAGR: ${chalk.bold(calculations.cagr.toFixed(1) + '%')}`);
+  }
+
+  if (data_points.length >= 3 || (!isQuarterly && calculations.cagr != null)) {
     lines.push('');
   }
 
@@ -116,6 +125,21 @@ function formatChange(pct: number): string {
   if (pct > 0) return chalk.green(str);
   if (pct < 0) return chalk.red(str);
   return str;
+}
+
+/** Generate a Unicode sparkline from a series of values */
+function sparkline(values: number[]): string {
+  if (values.length < 2) return '';
+  const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  if (range === 0) return blocks[4].repeat(values.length);
+
+  return values.map(v => {
+    const idx = Math.round(((v - min) / range) * (blocks.length - 1));
+    return blocks[idx];
+  }).join('');
 }
 
 function padRight(str: string, len: number): string {
