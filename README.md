@@ -69,6 +69,8 @@ Computed from the base metrics — no additional API calls:
 - **Full history export** — `--all` flag for complete available history
 - **Annual and quarterly data** — Switch with `quarterly` keyword or `-q` flag
 - **Multiple output formats** — Table (default), JSON (`-j`), CSV (`-c`)
+- **XBRL concept explorer** — Discover all available data for any company
+- **Watchlist** — Monitor metrics for changes across sessions
 - **MCP server** — Integrate with Claude Desktop/Code as an MCP tool
 - **SQLite cache** — Respects SEC rate limits, caches responses locally
 - **Full provenance** — Every data point cites its exact SEC filing
@@ -134,6 +136,25 @@ sec-edgar-nl filings MSFT --form 10-K --limit 5
 sec-edgar-nl filings TSLA --json
 ```
 
+### Explore XBRL concepts
+
+```bash
+sec-edgar-nl concepts AAPL                    # All concepts
+sec-edgar-nl concepts AAPL --search revenue   # Filter by keyword
+sec-edgar-nl concepts MSFT --search debt --json
+```
+
+### Watchlist
+
+```bash
+sec-edgar-nl watch add AAPL revenue        # Add to watchlist
+sec-edgar-nl watch add MSFT net_income     # Add another
+sec-edgar-nl watch list                     # View watchlist
+sec-edgar-nl watch check                    # Check for changes
+sec-edgar-nl watch remove AAPL revenue     # Remove item
+sec-edgar-nl watch clear                    # Clear all
+```
+
 ### Other commands
 
 ```bash
@@ -172,6 +193,7 @@ Add to your `claude_desktop_config.json`:
 | `company_financial_summary` | All metrics for one company |
 | `query_insider_trading` | Insider buy/sell activity |
 | `list_company_filings` | Recent SEC filing list |
+| `explore_xbrl_concepts` | Discover available XBRL data |
 | `list_metrics` | List all supported metrics |
 
 ### MCP Resources
