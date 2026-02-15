@@ -6,8 +6,8 @@ import {
 } from '../src/processing/metric-definitions.js';
 
 describe('METRIC_DEFINITIONS', () => {
-  it('has exactly 7 launch metrics', () => {
-    expect(METRIC_DEFINITIONS).toHaveLength(7);
+  it('has 13 metrics', () => {
+    expect(METRIC_DEFINITIONS).toHaveLength(13);
   });
 
   it('all metrics have unique IDs', () => {
@@ -76,5 +76,25 @@ describe('findMetricByName', () => {
 
   it('returns undefined for unrecognized name', () => {
     expect(findMetricByName('employee count')).toBeUndefined();
+  });
+
+  it('finds operating income by "ebit"', () => {
+    expect(findMetricByName('ebit')?.id).toBe('operating_income');
+  });
+
+  it('finds gross profit (not net income) by "gross profit"', () => {
+    expect(findMetricByName('gross profit')?.id).toBe('gross_profit');
+  });
+
+  it('finds EPS by "earnings per share"', () => {
+    expect(findMetricByName('earnings per share')?.id).toBe('eps');
+  });
+
+  it('finds total assets by "assets"', () => {
+    expect(findMetricByName('assets')?.id).toBe('total_assets');
+  });
+
+  it('finds equity by "book value"', () => {
+    expect(findMetricByName('book value')?.id).toBe('total_equity');
   });
 });

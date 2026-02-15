@@ -20,10 +20,17 @@ export function renderTable(result: QueryResult): string {
   lines.push(chalk.dim('='.repeat(header.length)));
   lines.push('');
 
+  // Value formatter based on metric type
+  const formatValue = metric.unit_type === 'ratio'
+    ? (v: number) => `$${v.toFixed(2)}`
+    : metric.unit_type === 'shares'
+    ? formatShareCount
+    : formatCurrency;
+
   // Compute value column width from data
   const valueColWidth = Math.max(
     metric.display_name.length + 2,
-    ...data_points.map(dp => formatCurrency(dp.value).length + 2),
+    ...data_points.map(dp => formatValue(dp.value).length + 2),
     16
   );
 
@@ -55,7 +62,7 @@ export function renderTable(result: QueryResult): string {
       }
     }
 
-    lines.push(`  ${padRight(periodStr, 14)}${padRight(formatCurrency(dp.value), valueColWidth)}${changeStr}`);
+    lines.push(`  ${padRight(periodStr, 14)}${padRight(formatValue(dp.value), valueColWidth)}${changeStr}`);
   }
 
   lines.push('');
@@ -82,6 +89,15 @@ export function renderTable(result: QueryResult): string {
   }
 
   return lines.join('\n');
+}
+
+export function formatShareCount(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(1)}K`;
+  return `${sign}${abs.toLocaleString('en-US')}`;
 }
 
 export function formatCurrency(value: number): string {

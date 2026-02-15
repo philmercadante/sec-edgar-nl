@@ -50,7 +50,9 @@ export async function fetchMetricData(
   let bestResult: { facts: SecFact[]; concept: string; maxFy: number; priority: number } | null = null;
 
   for (const concept of metric.xbrl_concepts.sort((a, b) => a.priority - b.priority)) {
-    const unit = metric.unit_type === 'currency' ? 'USD' : 'shares';
+    const unit = metric.unit_type === 'currency' ? 'USD'
+      : metric.unit_type === 'shares' ? 'shares'
+      : 'USD/shares';
     const facts = extractFacts(companyFacts, concept.taxonomy, concept.concept, unit);
 
     if (facts.length === 0) {
@@ -154,7 +156,9 @@ export async function fetchQuarterlyData(
   let bestResult: { facts: SecFact[]; concept: string; maxEndDate: string } | null = null;
 
   for (const concept of metric.xbrl_concepts.sort((a, b) => a.priority - b.priority)) {
-    const unit = metric.unit_type === 'currency' ? 'USD' : 'shares';
+    const unit = metric.unit_type === 'currency' ? 'USD'
+      : metric.unit_type === 'shares' ? 'shares'
+      : 'USD/shares';
     const facts = extractFacts(companyFacts, concept.taxonomy, concept.concept, unit);
 
     if (facts.length === 0) {
