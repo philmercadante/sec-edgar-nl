@@ -6,11 +6,20 @@
  * Exposes SEC EDGAR financial data as MCP tools that Claude Desktop,
  * Claude Code, and other MCP clients can use directly.
  *
- * Tools:
+ * Tools (13):
  *   - query_financial_metric: fetch a metric for one company
  *   - compare_companies: compare a metric across multiple companies
- *   - list_metrics: list all supported metrics
+ *   - compare_ratios: compare a ratio across multiple companies
+ *   - query_financial_ratio: compute a derived financial ratio
+ *   - company_financial_summary: all metrics for one company
+ *   - screen_companies: screen all companies by a metric
  *   - query_insider_trading: get insider buy/sell activity
+ *   - list_company_filings: recent SEC filings for a company
+ *   - search_filings: full-text search across EDGAR filings
+ *   - explore_xbrl_concepts: discover available XBRL data
+ *   - company_info: company profile information
+ *   - list_metrics: list all supported metrics
+ *   - list_ratios: list all supported financial ratios
  *
  * Resources:
  *   - sec-edgar-nl://metrics: full metric definitions
@@ -166,6 +175,25 @@ server.tool(
 );
 
 server.tool(
+  'list_ratios',
+  'List all supported derived financial ratios with their formulas and descriptions.',
+  {},
+  async () => {
+    const ratios = RATIO_DEFINITIONS.map(r => ({
+      id: r.id,
+      display_name: r.display_name,
+      description: r.description,
+      numerator: r.numerator,
+      denominator: r.denominator,
+      operation: r.operation || 'divide',
+      format: r.format,
+    }));
+
+    return { content: [{ type: 'text', text: JSON.stringify({ ratios }, null, 2) }] };
+  }
+);
+
+server.tool(
   'query_insider_trading',
   'Get recent insider trading activity (buys/sells by officers, directors, and 10%+ owners) for a public company from SEC Form 4 filings. Returns transactions with dates, prices, and a bullish/bearish signal classification.',
   {
@@ -211,7 +239,7 @@ server.tool(
 
 server.tool(
   'company_financial_summary',
-  'Get a comprehensive financial summary of a company — all 13 metrics plus derived ratios for a fiscal year. Efficiently uses a single SEC API call.',
+  'Get a comprehensive financial summary of a company — all 23 metrics plus derived ratios for a fiscal year. Efficiently uses a single SEC API call.',
   {
     company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
     year: z.number().min(2000).max(2030).optional().describe('Specific fiscal year (default: most recent)'),

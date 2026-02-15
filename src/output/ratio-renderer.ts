@@ -30,14 +30,20 @@ export function renderRatioTable(result: RatioResult): string {
     lines.push(`  ${padRight(yearStr, 14)}${padRight(valueStr, 16)}${padRight(numStr, 18)}${denStr}`);
   }
 
-  // Trend arrow
+  // Sparkline + Trend arrow
+  if (data_points.length >= 3) {
+    const spark = sparkline(data_points.map(dp => dp.value));
+    lines.push('');
+    lines.push(`  Trend: ${spark}`);
+  }
+
   if (data_points.length >= 2) {
     const first = data_points[0].value;
     const last = data_points[data_points.length - 1].value;
     const diff = last - first;
-    lines.push('');
+    if (data_points.length < 3) lines.push('');
     const trendStr = diff > 0 ? chalk.green(`+${formatDelta(diff, ratio.format)} ↑`) : diff < 0 ? chalk.red(`${formatDelta(diff, ratio.format)} ↓`) : chalk.dim('Flat →');
-    lines.push(`  Trend (FY${data_points[0].fiscal_year}→FY${data_points[data_points.length - 1].fiscal_year}): ${trendStr}`);
+    lines.push(`  Change (FY${data_points[0].fiscal_year}→FY${data_points[data_points.length - 1].fiscal_year}): ${trendStr}`);
   }
 
   return lines.join('\n');
@@ -213,6 +219,21 @@ function colorPct(value: number): string {
   if (value >= 10) return chalk.cyan(str);
   if (value < 0) return chalk.red(str);
   return str;
+}
+
+/** Generate a Unicode sparkline from a series of values */
+function sparkline(values: number[]): string {
+  if (values.length < 2) return '';
+  const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  if (range === 0) return blocks[4].repeat(values.length);
+
+  return values.map(v => {
+    const idx = Math.round(((v - min) / range) * (blocks.length - 1));
+    return blocks[idx];
+  }).join('');
 }
 
 function padRight(str: string, len: number): string {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { formatCurrency, formatShareCount } from '../src/output/table-renderer.js';
-import { renderRatioJson, renderRatioCsv } from '../src/output/ratio-renderer.js';
+import { formatCurrency, formatShareCount, sparkline, renderTable } from '../src/output/table-renderer.js';
+import { renderRatioJson, renderRatioCsv, renderRatioTable, renderCompareRatioTable, renderCompareRatioCsv } from '../src/output/ratio-renderer.js';
 import { renderFilingJson, type FilingListResult } from '../src/output/filing-renderer.js';
 import { renderSummaryJson, type SummaryResult } from '../src/output/summary-renderer.js';
 import { renderCsv, renderComparisonCsv } from '../src/output/csv-renderer.js';
@@ -236,5 +236,177 @@ describe('renderCsv', () => {
     const lines = csv.split('\n');
     const row2 = lines[2].split(',');
     expect(row2[2]).toBe('2.0'); // YoY change pct
+  });
+});
+
+describe('sparkline', () => {
+  it('returns empty string for single value', () => {
+    expect(sparkline([100])).toBe('');
+  });
+
+  it('generates 2-character sparkline for 2 values', () => {
+    const result = sparkline([10, 100]);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe('▁');
+    expect(result[1]).toBe('█');
+  });
+
+  it('generates correct length for N values', () => {
+    const values = [10, 20, 30, 40, 50];
+    expect(sparkline(values)).toHaveLength(5);
+  });
+
+  it('shows flat line for equal values', () => {
+    const result = sparkline([100, 100, 100, 100]);
+    expect(result).toBe('▅▅▅▅');
+  });
+
+  it('shows ascending pattern for increasing values', () => {
+    const result = sparkline([0, 50, 100]);
+    expect(result[0]).toBe('▁');
+    expect(result[2]).toBe('█');
+  });
+
+  it('shows descending pattern for decreasing values', () => {
+    const result = sparkline([100, 50, 0]);
+    expect(result[0]).toBe('█');
+    expect(result[2]).toBe('▁');
+  });
+
+  it('handles negative values', () => {
+    const result = sparkline([-100, -50, 0, 50, 100]);
+    expect(result).toHaveLength(5);
+    expect(result[0]).toBe('▁');
+    expect(result[4]).toBe('█');
+  });
+});
+
+describe('renderTable with sparkline', () => {
+  function makeDataPoint(fy: number, value: number) {
+    return {
+      metric_id: 'revenue', cik: '320193', company_name: 'Apple Inc.',
+      fiscal_year: fy, fiscal_period: 'FY' as const, period_start: `${fy - 1}-10-01`, period_end: `${fy}-09-30`,
+      value, unit: 'USD',
+      source: { accession_number: `accn-${fy}`, filing_date: `${fy + 1}-11-01`, form_type: '10-K', xbrl_concept: 'us-gaap:Revenues' },
+      restated_in: null, is_latest: true, extracted_at: '2025-01-01T00:00:00Z', checksum: 'test',
+    };
+  }
+
+  it('includes sparkline when 3+ data points', () => {
+    const result: QueryResult = {
+      company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+      metric: mockMetric,
+      data_points: [makeDataPoint(2022, 300e9), makeDataPoint(2023, 350e9), makeDataPoint(2024, 400e9)],
+      calculations: { yoy_changes: [], cagr: null, cagr_years: 0 },
+      provenance: { metric_concept: 'test', filings_used: [], dedup_strategy: 'test', period_type: 'annual', notes: [] },
+    };
+    const output = renderTable(result);
+    expect(output).toContain('Trend:');
+  });
+
+  it('omits sparkline when fewer than 3 data points', () => {
+    const result: QueryResult = {
+      company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+      metric: mockMetric,
+      data_points: [makeDataPoint(2023, 350e9), makeDataPoint(2024, 400e9)],
+      calculations: { yoy_changes: [], cagr: null, cagr_years: 0 },
+      provenance: { metric_concept: 'test', filings_used: [], dedup_strategy: 'test', period_type: 'annual', notes: [] },
+    };
+    const output = renderTable(result);
+    expect(output).not.toContain('Trend:');
+  });
+});
+
+describe('renderRatioTable with sparkline', () => {
+  const mockRatio: RatioResult = {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    ratio: { id: 'net_margin', display_name: 'Net Profit Margin', description: 'Net income / revenue', numerator: 'net_income', denominator: 'revenue', format: 'percentage' },
+    data_points: [
+      { fiscal_year: 2022, value: 23.5, numerator_value: 85e9, denominator_value: 362e9 },
+      { fiscal_year: 2023, value: 25.3, numerator_value: 100e9, denominator_value: 394e9 },
+      { fiscal_year: 2024, value: 26.4, numerator_value: 103e9, denominator_value: 391e9 },
+    ],
+    numerator_metric: 'Net Income',
+    denominator_metric: 'Revenue',
+  };
+
+  it('includes sparkline when 3+ data points', () => {
+    const output = renderRatioTable(mockRatio);
+    expect(output).toContain('Trend:');
+  });
+
+  it('includes change direction', () => {
+    const output = renderRatioTable(mockRatio);
+    expect(output).toContain('Change (FY2022→FY2024):');
+  });
+
+  it('omits sparkline with 2 data points', () => {
+    const twoPoints = { ...mockRatio, data_points: mockRatio.data_points.slice(1) };
+    const output = renderRatioTable(twoPoints);
+    expect(output).not.toContain('Trend:');
+    expect(output).toContain('Change (FY2023→FY2024):');
+  });
+});
+
+describe('renderCompareRatioCsv', () => {
+  const results: RatioResult[] = [
+    {
+      company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+      ratio: { id: 'net_margin', display_name: 'Net Profit Margin', description: 'test', numerator: 'net_income', denominator: 'revenue', format: 'percentage' },
+      data_points: [{ fiscal_year: 2023, value: 25.3, numerator_value: 100e9, denominator_value: 394e9 }],
+      numerator_metric: 'Net Income',
+      denominator_metric: 'Revenue',
+    },
+    {
+      company: { cik: '789019', ticker: 'MSFT', name: 'Microsoft Corp', fiscal_year_end_month: 0 },
+      ratio: { id: 'net_margin', display_name: 'Net Profit Margin', description: 'test', numerator: 'net_income', denominator: 'revenue', format: 'percentage' },
+      data_points: [{ fiscal_year: 2023, value: 34.1, numerator_value: 72e9, denominator_value: 211e9 }],
+      numerator_metric: 'Net Income',
+      denominator_metric: 'Revenue',
+    },
+  ];
+
+  it('outputs CSV with company columns', () => {
+    const csv = renderCompareRatioCsv(results);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('FY,AAPL,MSFT');
+    expect(lines[1]).toBe('2023,25.3,34.1');
+  });
+
+  it('returns empty string for no results', () => {
+    expect(renderCompareRatioCsv([])).toBe('');
+  });
+});
+
+describe('formatCurrency edge cases', () => {
+  it('formats negative trillions', () => {
+    expect(formatCurrency(-2.5e12)).toBe('-$2.50T');
+  });
+
+  it('formats exactly at threshold boundaries', () => {
+    expect(formatCurrency(1e12)).toBe('$1.00T');
+    expect(formatCurrency(1e9)).toBe('$1.00B');
+    expect(formatCurrency(1e6)).toBe('$1.00M');
+    expect(formatCurrency(1e3)).toBe('$1.00K');
+  });
+
+  it('formats sub-dollar amounts', () => {
+    expect(formatCurrency(0.5)).toBe('$1');  // rounds to nearest integer
+  });
+});
+
+describe('formatShareCount edge cases', () => {
+  it('formats negative values', () => {
+    expect(formatShareCount(-500e6)).toBe('-500.00M');
+  });
+
+  it('formats zero', () => {
+    expect(formatShareCount(0)).toBe('0');
+  });
+
+  it('formats exactly at thresholds', () => {
+    expect(formatShareCount(1e9)).toBe('1.00B');
+    expect(formatShareCount(1e6)).toBe('1.00M');
+    expect(formatShareCount(1e3)).toBe('1.0K');
   });
 });

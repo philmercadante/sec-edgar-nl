@@ -240,7 +240,7 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-### Available MCP Tools
+### Available MCP Tools (13)
 
 | Tool | Description |
 |------|-------------|
@@ -249,18 +249,26 @@ Add to your `claude_desktop_config.json`:
 | `compare_ratios` | Compare a ratio across companies |
 | `screen_companies` | Screen all companies by a metric (Frames API) |
 | `query_financial_ratio` | Compute a derived ratio |
-| `company_financial_summary` | All metrics for one company |
+| `company_financial_summary` | All 23 metrics + derived ratios for one company |
 | `company_info` | Company profile (SIC, industry, filing history) |
 | `query_insider_trading` | Insider buy/sell activity |
 | `list_company_filings` | Recent SEC filing list |
 | `search_filings` | Full-text search across EDGAR filings |
 | `explore_xbrl_concepts` | Discover available XBRL data |
 | `list_metrics` | List all supported metrics |
+| `list_ratios` | List all supported financial ratios |
 
 ### MCP Resources
 
 - `sec-edgar-nl://metrics` — Full metric definitions with XBRL mappings
 - `sec-edgar-nl://cache/stats` — Cache statistics
+
+### MCP Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `analyze_company` | Comprehensive financial analysis workflow for a single company |
+| `compare_financials` | Side-by-side financial comparison of multiple companies |
 
 ## Architecture
 
@@ -308,7 +316,7 @@ sec-edgar-nl/
 ## Testing
 
 ```bash
-npm test           # Run all tests (146 tests)
+npm test           # Run all tests (170 tests)
 npm run test:watch # Watch mode
 ```
 

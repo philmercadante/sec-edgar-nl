@@ -128,7 +128,7 @@ function formatChange(pct: number): string {
 }
 
 /** Generate a Unicode sparkline from a series of values */
-function sparkline(values: number[]): string {
+export function sparkline(values: number[]): string {
   if (values.length < 2) return '';
   const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
   const min = Math.min(...values);
