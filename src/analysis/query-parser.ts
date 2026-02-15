@@ -19,6 +19,7 @@ export interface ParsedQuery {
   years: number;
   periodType: PeriodType;
   quarters: number;
+  targetYear?: number;
   raw: string;
 }
 
@@ -30,13 +31,16 @@ export function parseQuery(input: string): ParsedQuery {
   const years = periodType === 'annual' ? extractYears(raw) : 5;
   const quarters = periodType === 'quarterly' ? extractQuarters(raw) : 0;
 
+  // Detect specific fiscal year (e.g., "FY2023", "in 2023", "2023")
+  const targetYear = extractTargetYear(raw);
+
   // Extract company
   const company = extractCompany(raw);
 
   // Extract metric
   const metric = extractMetric(raw);
 
-  return { company, metric, years, periodType, quarters, raw };
+  return { company, metric, years, periodType, quarters, targetYear, raw };
 }
 
 function detectPeriodType(input: string): PeriodType {
@@ -83,6 +87,31 @@ function extractQuarters(input: string): number {
   }
 
   return 8; // Default for quarterly
+}
+
+function extractTargetYear(input: string): number | undefined {
+  // Match "FY2023", "fy 2023", "in 2023", "for 2023"
+  const patterns = [
+    /\bFY\s*(\d{4})\b/i,
+    /\b(?:in|for|during)\s+(\d{4})\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = input.match(pattern);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      if (year >= 1993 && year <= 2030) return year;
+    }
+  }
+
+  // Don't match bare 4-digit numbers that could be year counts
+  // Only match trailing year: "AAPL revenue 2023"
+  const trailingYear = input.match(/\b(20[0-3]\d)\s*$/);
+  if (trailingYear) {
+    return parseInt(trailingYear[1], 10);
+  }
+
+  return undefined;
 }
 
 function extractCompany(input: string): string {

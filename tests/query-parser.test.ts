@@ -121,6 +121,33 @@ describe('parseQuery', () => {
     });
   });
 
+  describe('target year extraction', () => {
+    it('extracts FY2023', () => {
+      const result = parseQuery('AAPL revenue FY2023');
+      expect(result.targetYear).toBe(2023);
+    });
+
+    it('extracts "in 2024"', () => {
+      const result = parseQuery('MSFT net income in 2024');
+      expect(result.targetYear).toBe(2024);
+    });
+
+    it('extracts trailing year', () => {
+      const result = parseQuery('AAPL revenue 2023');
+      expect(result.targetYear).toBe(2023);
+    });
+
+    it('does not extract year count as target', () => {
+      const result = parseQuery('AAPL revenue 5 years');
+      expect(result.targetYear).toBeUndefined();
+    });
+
+    it('does not match out-of-range years', () => {
+      const result = parseQuery('AAPL revenue 1990');
+      expect(result.targetYear).toBeUndefined();
+    });
+  });
+
   describe('full golden query', () => {
     it('parses "How has Apple\'s R&D spending changed over the last 5 fiscal years?"', () => {
       const result = parseQuery("How has Apple's R&D spending changed over the last 5 fiscal years?");

@@ -49,14 +49,16 @@ server.tool(
     years: z.number().min(1).max(20).optional().default(5).describe('Number of fiscal years of data (1-20, default 5)'),
     period_type: z.enum(['annual', 'quarterly']).optional().default('annual').describe('Annual or quarterly data'),
     quarters: z.number().min(1).max(40).optional().default(8).describe('Number of quarters if quarterly (1-40, default 8)'),
+    target_year: z.number().min(1993).max(2030).optional().describe('Specific fiscal year to retrieve (e.g., 2023)'),
   },
-  async ({ company, metric, years, period_type, quarters }) => {
+  async ({ company, metric, years, period_type, quarters, target_year }) => {
     const result = await executeQueryCore({
       company,
       metric,
       years,
       periodType: period_type,
       quarters,
+      targetYear: target_year,
     });
 
     if (!result.success) {

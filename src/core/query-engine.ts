@@ -19,6 +19,7 @@ export interface QueryParams {
   years?: number;
   periodType?: 'annual' | 'quarterly';
   quarters?: number;
+  targetYear?: number;
 }
 
 export interface QueryEngineResult {
@@ -55,7 +56,7 @@ export interface CompareEngineResult {
  * Returns structured data — never prints to console.
  */
 export async function executeQueryCore(params: QueryParams): Promise<QueryEngineResult> {
-  const { company: companyQuery, metric: metricQuery, years = 5, periodType = 'annual', quarters = 8 } = params;
+  const { company: companyQuery, metric: metricQuery, years = 5, periodType = 'annual', quarters = 8, targetYear } = params;
 
   // Resolve metric
   const metric = getMetricDefinition(metricQuery) ?? findMetricByName(metricQuery);
@@ -94,10 +95,16 @@ export async function executeQueryCore(params: QueryParams): Promise<QueryEngine
 
   const company = resolved.company;
 
-  // Fetch data
-  const { dataPoints, conceptUsed, conceptSelection } = periodType === 'quarterly'
+  // Fetch data — for target year lookups, fetch extra history to ensure we have it
+  const fetchYears = targetYear ? 50 : years;
+  let { dataPoints, conceptUsed, conceptSelection } = periodType === 'quarterly'
     ? await fetchQuarterlyData(company, metric, quarters)
-    : await fetchMetricData(company, metric, years);
+    : await fetchMetricData(company, metric, fetchYears);
+
+  // Filter for specific year if requested
+  if (targetYear && dataPoints.length > 0) {
+    dataPoints = dataPoints.filter(dp => dp.fiscal_year === targetYear);
+  }
 
   if (dataPoints.length === 0) {
     return {

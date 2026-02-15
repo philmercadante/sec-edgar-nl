@@ -24,14 +24,22 @@ function validatePositiveInt(value: string | undefined, name: string): number | 
   return n;
 }
 
-async function executeQuery(queryStr: string, options: { json?: boolean; csv?: boolean; years?: string }): Promise<void> {
+async function executeQuery(queryStr: string, options: { json?: boolean; csv?: boolean; years?: string; all?: boolean; year?: string }): Promise<void> {
   try {
     const parsed = parseQuery(queryStr);
 
     // Override years from explicit flag only
-    if (options.years) {
+    if (options.all) {
+      parsed.years = 100; // Effectively unlimited
+    } else if (options.years) {
       const years = validatePositiveInt(options.years, '--years')!;
       parsed.years = years;
+    }
+
+    // Override target year from explicit flag
+    if (options.year) {
+      const yr = validatePositiveInt(options.year, '--year')!;
+      parsed.targetYear = yr;
     }
 
     if (!parsed.company) {
@@ -55,6 +63,7 @@ async function executeQuery(queryStr: string, options: { json?: boolean; csv?: b
       years: parsed.years,
       periodType: parsed.periodType,
       quarters: parsed.quarters,
+      targetYear: parsed.targetYear,
     });
 
     if (!result.success) {
@@ -129,7 +138,9 @@ program
   .option('-j, --json', 'Output as JSON instead of table')
   .option('-c, --csv', 'Output as CSV')
   .option('-y, --years <n>', 'Number of years to show')
-  .action(async (queryParts: string[], options: { json?: boolean; csv?: boolean; years?: string }) => {
+  .option('-a, --all', 'Show full available history')
+  .option('--year <yyyy>', 'Show a specific fiscal year')
+  .action(async (queryParts: string[], options: { json?: boolean; csv?: boolean; years?: string; all?: boolean; year?: string }) => {
     await executeQuery(queryParts.join(' '), options);
   });
 
@@ -289,7 +300,9 @@ program.on('command:*', async (args) => {
   const allArgs = program.args;
   let json = false;
   let csv = false;
+  let all = false;
   let years: string | undefined;
+  let year: string | undefined;
   const queryParts: string[] = [];
 
   for (let i = 0; i < allArgs.length; i++) {
@@ -297,15 +310,19 @@ program.on('command:*', async (args) => {
       json = true;
     } else if (allArgs[i] === '--csv' || allArgs[i] === '-c') {
       csv = true;
+    } else if (allArgs[i] === '--all' || allArgs[i] === '-a') {
+      all = true;
     } else if ((allArgs[i] === '--years' || allArgs[i] === '-y') && i + 1 < allArgs.length) {
       years = allArgs[++i];
+    } else if (allArgs[i] === '--year' && i + 1 < allArgs.length) {
+      year = allArgs[++i];
     } else {
       queryParts.push(allArgs[i]);
     }
   }
 
   if (queryParts.length > 0) {
-    await executeQuery(queryParts.join(' '), { json, csv, years });
+    await executeQuery(queryParts.join(' '), { json, csv, years, all, year });
   }
 });
 
