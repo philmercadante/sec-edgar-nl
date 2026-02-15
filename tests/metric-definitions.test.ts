@@ -97,4 +97,20 @@ describe('findMetricByName', () => {
   it('finds equity by "book value"', () => {
     expect(findMetricByName('book value')?.id).toBe('total_equity');
   });
+
+  it('finds net income by "income"', () => {
+    expect(findMetricByName('income')?.id).toBe('net_income');
+  });
+
+  it('finds revenue by "net sales"', () => {
+    expect(findMetricByName('net sales')?.id).toBe('revenue');
+  });
+
+  it('finds OCF by "cash flow from operations"', () => {
+    expect(findMetricByName('cash flow from operations')?.id).toBe('operating_cash_flow');
+  });
+
+  it('finds shares by "common shares"', () => {
+    expect(findMetricByName('common shares')?.id).toBe('shares_outstanding');
+  });
 });

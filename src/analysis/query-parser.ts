@@ -130,5 +130,5 @@ function extractMetric(input: string): MetricDefinition | null {
     .replace(/\bquarterly\b/gi, '')
     .trim();
 
-  return findMetricByName(cleaned) ?? findMetricByName(lower);
+  return findMetricByName(cleaned) ?? findMetricByName(lower) ?? null;
 }

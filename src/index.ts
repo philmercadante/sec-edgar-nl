@@ -14,13 +14,24 @@ import { fetchInsiderActivity } from './processing/insider-processor.js';
 import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
 
+function validatePositiveInt(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  const n = parseInt(value, 10);
+  if (isNaN(n) || n < 1) {
+    console.error(chalk.red(`Invalid ${name}: "${value}". Must be a positive integer.`));
+    process.exit(1);
+  }
+  return n;
+}
+
 async function executeQuery(queryStr: string, options: { json?: boolean; csv?: boolean; years?: string }): Promise<void> {
   try {
     const parsed = parseQuery(queryStr);
 
     // Override years from explicit flag only
     if (options.years) {
-      parsed.years = parseInt(options.years, 10);
+      const years = validatePositiveInt(options.years, '--years')!;
+      parsed.years = years;
     }
 
     if (!parsed.company) {
@@ -169,7 +180,7 @@ program
   .option('-y, --years <n>', 'Number of years', '5')
   .action(async (args: string[], options: { json?: boolean; csv?: boolean; years?: string }) => {
     try {
-      const years = parseInt(options.years || '5', 10);
+      const years = validatePositiveInt(options.years || '5', '--years')!;
 
       // Separate tickers from metric name
       const tickers: string[] = [];
@@ -241,7 +252,7 @@ program
   .option('-j, --json', 'Output as JSON')
   .action(async (companyArg: string, options: { days?: string; json?: boolean }) => {
     try {
-      const days = parseInt(options.days || '90', 10);
+      const days = validatePositiveInt(options.days || '90', '--days')!;
 
       const resolved = await resolveCompanyWithSuggestions(companyArg);
       if (!resolved.company) {

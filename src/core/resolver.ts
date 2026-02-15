@@ -52,7 +52,12 @@ async function loadTickers(): Promise<void> {
     }
   }
 
-  const data = JSON.parse(body) as Record<string, SecTickerEntry>;
+  let data: Record<string, SecTickerEntry>;
+  try {
+    data = JSON.parse(body) as Record<string, SecTickerEntry>;
+  } catch {
+    throw new Error('Failed to parse SEC company tickers data. The response may be corrupted — try clearing the cache with: sec-edgar-nl cache --clear');
+  }
   tickerMap = new Map();
   nameMap = new Map();
 

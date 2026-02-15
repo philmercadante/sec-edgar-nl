@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { renderTable } from './table-renderer.js';
+import { renderTable, formatCurrency, formatShareCount } from './table-renderer.js';
 import type { QueryResult } from '../core/types.js';
 
 /**
@@ -28,6 +28,13 @@ export function renderComparison(results: QueryResult[]): string {
   }
   const years = Array.from(allYears).sort((a, b) => a - b);
 
+  // Value formatter based on metric type
+  const formatValue = metric.unit_type === 'ratio'
+    ? (v: number) => `$${v.toFixed(2)}`
+    : metric.unit_type === 'shares'
+    ? formatShareCount
+    : formatCurrency;
+
   // Column widths
   const fyColWidth = 10;
   const companyColWidth = 14;
@@ -45,7 +52,7 @@ export function renderComparison(results: QueryResult[]): string {
     let row = `  ${padRight(String(year), fyColWidth)}`;
     for (const r of results) {
       const dp = r.data_points.find(d => d.fiscal_year === year);
-      const val = dp ? formatCurrency(dp.value) : chalk.dim('--');
+      const val = dp ? formatValue(dp.value) : chalk.dim('--');
       row += padRight(val, companyColWidth);
     }
     lines.push(row);
@@ -91,16 +98,6 @@ export function renderComparisonJson(results: QueryResult[]): string {
       provenance: r.provenance,
     })),
   }, null, 2);
-}
-
-function formatCurrency(value: number): string {
-  const abs = Math.abs(value);
-  const sign = value < 0 ? '-' : '';
-  if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(2)}K`;
-  return `${sign}$${abs.toFixed(0)}`;
 }
 
 function padRight(str: string, len: number): string {

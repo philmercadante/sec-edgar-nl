@@ -24,7 +24,8 @@ export function renderCsv(result: QueryResult): string {
     if (i > 0) {
       if (isQuarterly) {
         const prev = data_points[i - 1].value;
-        if (prev !== 0) {
+        // Skip sign flips (e.g., profit to loss) — percentage change is meaningless
+        if (prev !== 0 && !((prev > 0 && dp.value < 0) || (prev < 0 && dp.value > 0))) {
           change = (((dp.value - prev) / Math.abs(prev)) * 100).toFixed(1);
         }
       } else {
