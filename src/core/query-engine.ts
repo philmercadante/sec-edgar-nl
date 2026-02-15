@@ -385,6 +385,7 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
 export interface SummaryParams {
   company: string;
   year?: number; // Specific FY; default = most recent
+  years?: number; // Multi-year trend (e.g., 5 for FY2020-2024)
 }
 
 export interface SummaryEngineResult {
@@ -402,7 +403,7 @@ export interface SummaryEngineResult {
  * Uses a single CompanyFacts API call (subsequent metrics are cache hits).
  */
 export async function executeSummaryCore(params: SummaryParams): Promise<SummaryEngineResult> {
-  const { company: companyQuery, year: targetYear } = params;
+  const { company: companyQuery, year: targetYear, years: trendYears } = params;
 
   // Resolve company
   const resolved = await resolveCompanyWithSuggestions(companyQuery);
@@ -427,12 +428,13 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
   }
 
   const company = resolved.company;
+  const fetchYears = trendYears ?? 2; // Fetch extra for YoY or multi-year trend
 
   // Fetch all metrics (first call hits SEC API, rest are cache hits)
   const metricResults = await Promise.all(
     METRIC_DEFINITIONS.map(async (metric) => {
       try {
-        const result = await fetchMetricData(company, metric, 2); // Get 2 years for YoY
+        const result = await fetchMetricData(company, metric, fetchYears);
         return { metric, dataPoints: result.dataPoints };
       } catch {
         return { metric, dataPoints: [] };
@@ -473,11 +475,17 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
       }
     }
 
+    // For multi-year trend, include all years' values
+    const yearValues = trendYears
+      ? dataPoints.map(dp => ({ fiscal_year: dp.fiscal_year, value: dp.value }))
+      : undefined;
+
     metrics.push({
       metric,
       value: current.value,
       prior_year_value: prior?.value,
       yoy_change: yoyChange,
+      year_values: yearValues,
     });
 
     valuesByMetric.set(metric.id, current.value);
@@ -500,6 +508,10 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
   const capex = valuesByMetric.get('capex');
   const totalDebt = valuesByMetric.get('total_debt');
   const totalEquity = valuesByMetric.get('total_equity');
+  const currentAssets = valuesByMetric.get('current_assets');
+  const currentLiabilities = valuesByMetric.get('current_liabilities');
+  const totalAssets = valuesByMetric.get('total_assets');
+  const interestExpense = valuesByMetric.get('interest_expense');
 
   if (revenue && netIncome && revenue !== 0) {
     derived.push({ name: 'Net Margin', value: Math.round((netIncome / revenue) * 1000) / 10, format: 'percentage' });
@@ -515,6 +527,18 @@ export async function executeSummaryCore(params: SummaryParams): Promise<Summary
   }
   if (totalDebt && totalEquity && totalEquity !== 0) {
     derived.push({ name: 'Debt-to-Equity', value: Math.round((totalDebt / totalEquity) * 100) / 100, format: 'multiple' });
+  }
+  if (currentAssets && currentLiabilities && currentLiabilities !== 0) {
+    derived.push({ name: 'Current Ratio', value: Math.round((currentAssets / currentLiabilities) * 100) / 100, format: 'multiple' });
+  }
+  if (netIncome && totalAssets && totalAssets !== 0) {
+    derived.push({ name: 'Return on Assets', value: Math.round((netIncome / totalAssets) * 1000) / 10, format: 'percentage' });
+  }
+  if (netIncome && totalEquity && totalEquity !== 0) {
+    derived.push({ name: 'Return on Equity', value: Math.round((netIncome / totalEquity) * 1000) / 10, format: 'percentage' });
+  }
+  if (operatingIncome && interestExpense && interestExpense !== 0) {
+    derived.push({ name: 'Interest Coverage', value: Math.round((operatingIncome / interestExpense) * 100) / 100, format: 'multiple' });
   }
 
   const companyInfo: CompanyInfo = {

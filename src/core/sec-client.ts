@@ -154,6 +154,11 @@ export interface CompanySubmissions {
   entityType: string;
   name: string;
   tickers: string[];
+  exchanges: string[];
+  sic: string;
+  sicDescription: string;
+  stateOfIncorporation: string;
+  fiscalYearEnd: string;
   filings: {
     recent: {
       accessionNumber: string[];

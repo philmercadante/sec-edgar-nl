@@ -16,6 +16,7 @@ export interface SummaryResult {
     value: number;
     prior_year_value?: number;
     yoy_change?: number;
+    year_values?: Array<{ fiscal_year: number; value: number }>;
   }>;
   derived: Array<{
     name: string;
@@ -112,6 +113,99 @@ export function renderSummaryJson(result: SummaryResult): string {
       format: d.format,
     })),
   }, null, 2);
+}
+
+/**
+ * Render a multi-year trend view: metrics as rows, years as columns.
+ */
+export function renderSummaryTrendTable(result: SummaryResult): string {
+  const lines: string[] = [];
+
+  // Collect all years from the data
+  const allYears = new Set<number>();
+  for (const m of result.metrics) {
+    if (m.year_values) {
+      for (const yv of m.year_values) allYears.add(yv.fiscal_year);
+    }
+  }
+  const years = [...allYears].sort((a, b) => a - b);
+  if (years.length === 0) return renderSummaryTable(result);
+
+  const header = `${result.company.name} (${result.company.ticker}) — Financial Trend FY${years[0]}-${years[years.length - 1]}`;
+  lines.push(chalk.bold(header));
+  lines.push(chalk.dim('='.repeat(header.length)));
+  lines.push('');
+
+  const COL_WIDTH = 14;
+  const LABEL_WIDTH = 28;
+
+  // Column headers
+  const yearHeader = padRight('', LABEL_WIDTH) + years.map(y => padRight(`FY${y}`, COL_WIDTH)).join('');
+  lines.push(chalk.dim(yearHeader));
+  lines.push(chalk.dim('-'.repeat(LABEL_WIDTH + years.length * COL_WIDTH)));
+
+  // Group by statement type
+  const groups: Record<string, typeof result.metrics> = {
+    'Income Statement': [],
+    'Cash Flow': [],
+    'Balance Sheet': [],
+  };
+
+  for (const m of result.metrics) {
+    const group = m.metric.statement_type === 'income_statement' ? 'Income Statement'
+      : m.metric.statement_type === 'cash_flow' ? 'Cash Flow'
+      : 'Balance Sheet';
+    groups[group].push(m);
+  }
+
+  for (const [groupName, metrics] of Object.entries(groups)) {
+    if (metrics.length === 0) continue;
+
+    lines.push(chalk.bold.underline(`  ${groupName}`));
+
+    for (const m of metrics) {
+      const yearMap = new Map(m.year_values?.map(yv => [yv.fiscal_year, yv.value]) ?? []);
+
+      const formatFn = m.metric.unit_type === 'ratio'
+        ? (v: number) => `$${v.toFixed(2)}`
+        : m.metric.unit_type === 'shares'
+        ? formatShareCount
+        : formatCurrency;
+
+      const cells = years.map(y => {
+        const val = yearMap.get(y);
+        return padRight(val !== undefined ? formatFn(val) : chalk.dim('—'), COL_WIDTH);
+      }).join('');
+
+      lines.push(`  ${padRight(m.metric.display_name, LABEL_WIDTH)}${cells}`);
+    }
+
+    lines.push('');
+  }
+
+  // Derived ratios (single year — most recent)
+  if (result.derived.length > 0) {
+    lines.push(chalk.bold.underline(`  Key Ratios (FY${result.fiscal_year})`));
+
+    for (const d of result.derived) {
+      let valueStr: string;
+      if (d.format === 'percentage') {
+        valueStr = `${d.value.toFixed(1)}%`;
+      } else if (d.format === 'multiple') {
+        valueStr = `${d.value.toFixed(2)}x`;
+      } else {
+        valueStr = formatCurrency(d.value);
+      }
+
+      lines.push(`  ${padRight(d.name, LABEL_WIDTH)}${valueStr}`);
+    }
+
+    lines.push('');
+  }
+
+  lines.push(chalk.dim('  Source: SEC EDGAR XBRL filings'));
+
+  return lines.join('\n');
 }
 
 function padRight(str: string, len: number): string {

@@ -17,7 +17,7 @@ import { getCompanySubmissions, getCompanyFacts } from './core/sec-client.js';
 import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
-import { renderSummaryTable, renderSummaryJson } from './output/summary-renderer.js';
+import { renderSummaryTable, renderSummaryJson, renderSummaryTrendTable } from './output/summary-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -341,14 +341,17 @@ program
   .description('Financial summary of a company — all metrics at a glance')
   .argument('<company>', 'Company ticker or name')
   .option('--year <yyyy>', 'Specific fiscal year (default: most recent)')
+  .option('-y, --years <n>', 'Show multi-year trend (e.g., 5 for last 5 years)')
   .option('-j, --json', 'Output as JSON')
-  .action(async (companyArg: string, options: { year?: string; json?: boolean }) => {
+  .action(async (companyArg: string, options: { year?: string; years?: string; json?: boolean }) => {
     try {
       const year = options.year ? validatePositiveInt(options.year, '--year') : undefined;
+      const years = options.years ? validatePositiveInt(options.years, '--years') : undefined;
 
       const result = await executeSummaryCore({
         company: companyArg,
         year,
+        years,
       });
 
       if (!result.success) {
@@ -366,6 +369,10 @@ program
 
       if (options.json) {
         console.log(renderSummaryJson(result.result!));
+      } else if (years) {
+        console.log('');
+        console.log(renderSummaryTrendTable(result.result!));
+        console.log('');
       } else {
         console.log('');
         console.log(renderSummaryTable(result.result!));
@@ -580,6 +587,91 @@ program
           console.log(`  ${chalk.cyan(c.concept)}`);
           console.log(`    ${chalk.dim(c.label)} | ${c.taxonomy} | ${c.units.join(', ')} | ${c.fact_count} facts | ${yearRange}`);
         }
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('info')
+  .description('Show company profile and filing information')
+  .argument('<company>', 'Company ticker or name')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (companyArg: string, options: { json?: boolean }) => {
+    try {
+      const resolved = await resolveCompanyWithSuggestions(companyArg);
+      if (!resolved.company) {
+        if (resolved.suggestions.length > 0) {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of resolved.suggestions) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(`Could not find company: "${companyArg}"`));
+        }
+        process.exit(1);
+      }
+
+      const submissions = await getCompanySubmissions(resolved.company.cik);
+
+      const profile = {
+        name: submissions.name,
+        cik: resolved.company.cik,
+        ticker: resolved.company.ticker,
+        entity_type: submissions.entityType || 'N/A',
+        sic: submissions.sic || 'N/A',
+        sic_description: submissions.sicDescription || 'N/A',
+        state_of_incorporation: submissions.stateOfIncorporation || 'N/A',
+        fiscal_year_end: submissions.fiscalYearEnd || 'N/A',
+        tickers: submissions.tickers || [],
+        exchanges: submissions.exchanges || [],
+        total_filings: submissions.filings.recent.form.length,
+        recent_10k: '',
+        recent_10q: '',
+      };
+
+      // Find most recent 10-K and 10-Q
+      for (let i = 0; i < submissions.filings.recent.form.length; i++) {
+        if (!profile.recent_10k && submissions.filings.recent.form[i] === '10-K') {
+          profile.recent_10k = submissions.filings.recent.filingDate[i];
+        }
+        if (!profile.recent_10q && submissions.filings.recent.form[i] === '10-Q') {
+          profile.recent_10q = submissions.filings.recent.filingDate[i];
+        }
+        if (profile.recent_10k && profile.recent_10q) break;
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(profile, null, 2));
+      } else {
+        const header = `${profile.name} (${profile.ticker})`;
+        console.log('');
+        console.log(chalk.bold(header));
+        console.log(chalk.dim('='.repeat(header.length)));
+        console.log('');
+        console.log(`  ${chalk.dim('CIK:')}               ${profile.cik}`);
+        console.log(`  ${chalk.dim('Entity Type:')}        ${profile.entity_type}`);
+        console.log(`  ${chalk.dim('SIC Code:')}           ${profile.sic} — ${profile.sic_description}`);
+        console.log(`  ${chalk.dim('State:')}              ${profile.state_of_incorporation}`);
+        console.log(`  ${chalk.dim('Fiscal Year End:')}    ${profile.fiscal_year_end}`);
+        if (profile.tickers.length > 0) {
+          console.log(`  ${chalk.dim('Tickers:')}            ${profile.tickers.join(', ')}`);
+        }
+        if (profile.exchanges.length > 0) {
+          console.log(`  ${chalk.dim('Exchanges:')}          ${profile.exchanges.join(', ')}`);
+        }
+        console.log('');
+        console.log(chalk.bold('  Filing History'));
+        console.log(`  ${chalk.dim('Total Filings:')}      ${profile.total_filings}`);
+        if (profile.recent_10k) console.log(`  ${chalk.dim('Latest 10-K:')}        ${profile.recent_10k}`);
+        if (profile.recent_10q) console.log(`  ${chalk.dim('Latest 10-Q:')}        ${profile.recent_10q}`);
+        console.log('');
+        console.log(chalk.dim(`  EDGAR: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${profile.cik}`));
         console.log('');
       }
     } catch (err) {

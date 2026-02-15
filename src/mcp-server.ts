@@ -409,6 +409,44 @@ server.tool(
   }
 );
 
+server.tool(
+  'company_info',
+  'Get company profile information from SEC EDGAR: CIK, SIC code, industry, state of incorporation, fiscal year end, and filing history.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+  },
+  async ({ company }) => {
+    const resolved = await resolveCompanyWithSuggestions(company);
+    if (!resolved.company) {
+      let errorText = `Could not find company: "${company}"`;
+      if (resolved.suggestions.length > 0) {
+        errorText = `Ambiguous company: "${company}"\n\nDid you mean:\n` +
+          resolved.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const { getCompanySubmissions } = await import('./core/sec-client.js');
+    const submissions = await getCompanySubmissions(resolved.company.cik);
+
+    const profile = {
+      name: submissions.name,
+      cik: resolved.company.cik,
+      ticker: resolved.company.ticker,
+      entity_type: submissions.entityType || null,
+      sic: submissions.sic || null,
+      sic_description: submissions.sicDescription || null,
+      state_of_incorporation: submissions.stateOfIncorporation || null,
+      fiscal_year_end: submissions.fiscalYearEnd || null,
+      tickers: submissions.tickers || [],
+      exchanges: submissions.exchanges || [],
+      total_filings: submissions.filings.recent.form.length,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(profile, null, 2) }] };
+  }
+);
+
 // ── Resources ──────────────────────────────────────────────────────────
 
 server.resource(
