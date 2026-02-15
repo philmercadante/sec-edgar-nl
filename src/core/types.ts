@@ -124,3 +124,65 @@ export interface CikLookup {
   ticker: string;
   name: string;
 }
+
+// ── Form 4 Insider Trading Types ──────────────────────────────────────
+
+/** SEC Form 4 transaction codes */
+export type TransactionCode =
+  | 'P'  // Open market purchase
+  | 'S'  // Open market sale
+  | 'A'  // Grant/award
+  | 'D'  // Disposition to issuer
+  | 'F'  // Tax withholding
+  | 'M'  // Option exercise
+  | 'G'  // Gift
+  | 'C'  // Conversion
+  | 'X'  // Option expiration
+  | 'J'  // Other
+  ;
+
+export interface InsiderInfo {
+  cik: string;
+  name: string;
+  is_director: boolean;
+  is_officer: boolean;
+  is_ten_percent_owner: boolean;
+  officer_title: string;
+}
+
+export interface InsiderTransaction {
+  insider: InsiderInfo;
+  transaction_date: string;
+  transaction_code: TransactionCode;
+  transaction_type: 'acquisition' | 'disposition';
+  shares: number;
+  price_per_share: number | null;
+  total_value: number | null;
+  shares_owned_after: number;
+  filing_date: string;
+  filing_accession: string;
+}
+
+export type InsiderSignal = 'bullish' | 'bearish' | 'neutral' | 'mixed';
+
+export interface InsiderActivityResult {
+  company: CompanyInfo;
+  period_days: number;
+  transactions: InsiderTransaction[];
+  summary: {
+    total_buys: number;
+    total_sells: number;
+    buy_shares: number;
+    sell_shares: number;
+    buy_value: number;
+    sell_value: number;
+    net_shares: number;
+    unique_insiders: number;
+    signal: InsiderSignal;
+  };
+  provenance: {
+    filing_count: number;
+    filing_date_range: [string, string];
+    accession_numbers: string[];
+  };
+}

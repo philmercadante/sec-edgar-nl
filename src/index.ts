@@ -9,6 +9,9 @@ import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
 import { closeCache, clearCache, getCacheStats } from './core/cache.js';
 import { METRIC_DEFINITIONS, findMetricByName } from './processing/metric-definitions.js';
+import { fetchInsiderActivity } from './processing/insider-processor.js';
+import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
+import { resolveCompanyWithSuggestions } from './core/resolver.js';
 
 async function executeQuery(queryStr: string, options: { json?: boolean; years?: string }): Promise<void> {
   try {
@@ -212,6 +215,47 @@ program
       } else {
         console.log('');
         console.log(renderComparison(results));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('insiders')
+  .alias('insider')
+  .description('Show insider trading activity for a company (e.g., insiders AAPL)')
+  .argument('<company>', 'Company ticker or name')
+  .option('-d, --days <n>', 'Number of days to look back', '90')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (companyArg: string, options: { days?: string; json?: boolean }) => {
+    try {
+      const days = parseInt(options.days || '90', 10);
+
+      const resolved = await resolveCompanyWithSuggestions(companyArg);
+      if (!resolved.company) {
+        if (resolved.suggestions.length > 0) {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of resolved.suggestions) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(`Could not find company: "${companyArg}"`));
+        }
+        process.exit(1);
+      }
+
+      const result = await fetchInsiderActivity(resolved.company, { days });
+
+      if (options.json) {
+        console.log(renderInsiderJson(result));
+      } else {
+        console.log('');
+        console.log(renderInsiderTable(result));
         console.log('');
       }
     } catch (err) {

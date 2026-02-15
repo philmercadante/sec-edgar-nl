@@ -147,3 +147,51 @@ export function extractFacts(
 
   return conceptFacts.units[unit] ?? [];
 }
+
+/** Shape of the SEC submissions API response */
+export interface CompanySubmissions {
+  cik: string;
+  entityType: string;
+  name: string;
+  tickers: string[];
+  filings: {
+    recent: {
+      accessionNumber: string[];
+      filingDate: string[];
+      form: string[];
+      primaryDocument: string[];
+      primaryDocDescription: string[];
+    };
+    files: Array<{ name: string; filingCount: number }>;
+  };
+}
+
+/**
+ * Fetch company submissions (filing history) from SEC EDGAR.
+ * Returns the list of all recent filings for a company.
+ */
+export async function getCompanySubmissions(cik: string): Promise<CompanySubmissions> {
+  const paddedCik = cik.padStart(10, '0');
+  const url = `${BASE_URL}/submissions/CIK${paddedCik}.json`;
+  const body = await fetchWithRateLimit(url, 24); // Cache for 1 day
+
+  try {
+    return JSON.parse(body) as CompanySubmissions;
+  } catch {
+    throw new DataParseError(
+      `Failed to parse submissions for CIK ${cik}.`,
+      url
+    );
+  }
+}
+
+/**
+ * Fetch a specific filing document (XML, HTML, etc.)
+ * Used for Form 4 XML documents and 13F information tables.
+ */
+export async function getFilingDocument(cik: string, accessionNumber: string, filename: string): Promise<string> {
+  const paddedCik = cik.padStart(10, '0');
+  const accessionNoDashes = accessionNumber.replace(/-/g, '');
+  const url = `https://www.sec.gov/Archives/edgar/data/${paddedCik}/${accessionNoDashes}/${filename}`;
+  return fetchWithRateLimit(url, 720); // Cache for 30 days (filings are immutable)
+}

@@ -10,6 +10,7 @@
  *   - query_financial_metric: fetch a metric for one company
  *   - compare_companies: compare a metric across multiple companies
  *   - list_metrics: list all supported metrics
+ *   - query_insider_trading: get insider buy/sell activity
  *
  * Resources:
  *   - sec-edgar-nl://metrics: full metric definitions
@@ -26,6 +27,9 @@ import { z } from 'zod';
 import { executeQueryCore, executeCompareCore } from './core/query-engine.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
 import { getCacheStats } from './core/cache.js';
+import { resolveCompanyWithSuggestions } from './core/resolver.js';
+import { fetchInsiderActivity } from './processing/insider-processor.js';
+import { TRANSACTION_CODE_LABELS } from './processing/insider-processor.js';
 
 const METRIC_IDS = METRIC_DEFINITIONS.map(m => m.id) as [string, ...string[]];
 
@@ -155,6 +159,50 @@ server.tool(
     }));
 
     return { content: [{ type: 'text', text: JSON.stringify({ metrics }, null, 2) }] };
+  }
+);
+
+server.tool(
+  'query_insider_trading',
+  'Get recent insider trading activity (buys/sells by officers, directors, and 10%+ owners) for a public company from SEC Form 4 filings. Returns transactions with dates, prices, and a bullish/bearish signal classification.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name (e.g., Apple)'),
+    days: z.number().min(1).max(365).optional().default(90).describe('Look-back period in days (default 90)'),
+  },
+  async ({ company, days }) => {
+    // Resolve company
+    const resolved = await resolveCompanyWithSuggestions(company);
+    if (!resolved.company) {
+      let errorText = `Could not find company: "${company}"`;
+      if (resolved.suggestions.length > 0) {
+        errorText = `Ambiguous company: "${company}"\n\nDid you mean:\n` +
+          resolved.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const result = await fetchInsiderActivity(resolved.company, { days });
+
+    const output = {
+      company: { cik: result.company.cik, ticker: result.company.ticker, name: result.company.name },
+      period_days: result.period_days,
+      summary: result.summary,
+      transactions: result.transactions.map(t => ({
+        date: t.transaction_date,
+        insider: { name: t.insider.name, title: t.insider.officer_title || (t.insider.is_director ? 'Director' : '') },
+        type: t.transaction_code,
+        type_label: TRANSACTION_CODE_LABELS[t.transaction_code] || t.transaction_code,
+        direction: t.transaction_type,
+        shares: t.shares,
+        price: t.price_per_share,
+        value: t.total_value,
+        shares_after: t.shares_owned_after,
+        filing: { accession: t.filing_accession, date: t.filing_date },
+      })),
+      provenance: result.provenance,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
   }
 );
 
