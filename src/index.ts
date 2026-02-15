@@ -148,7 +148,7 @@ const program = new Command();
 program
   .name('sec-edgar-nl')
   .description('Trustworthy financial answers from SEC EDGAR filings with full provenance')
-  .version('0.5.0');
+  .version('0.6.0');
 
 program
   .command('query')

@@ -1,6 +1,6 @@
 {
   "name": "sec-edgar-nl",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Trustworthy financial answers from SEC EDGAR filings with full provenance",
   "type": "module",
   "main": "dist/index.js",
