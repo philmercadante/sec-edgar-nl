@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { executeQueryCore, executeCompareCore, executeRatioCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
@@ -17,6 +17,7 @@ import { getCompanySubmissions } from './core/sec-client.js';
 import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
+import { renderSummaryTable, renderSummaryJson } from './output/summary-renderer.js';
 
 function validatePositiveInt(value: string | undefined, name: string): number | undefined {
   if (value === undefined) return undefined;
@@ -322,6 +323,49 @@ program
       console.log(`  ${chalk.cyan(r.id.padEnd(22))} ${r.display_name}`);
       console.log(`  ${''.padEnd(22)} ${chalk.dim(r.description)}`);
       console.log('');
+    }
+  });
+
+program
+  .command('summary')
+  .description('Financial summary of a company — all metrics at a glance')
+  .argument('<company>', 'Company ticker or name')
+  .option('--year <yyyy>', 'Specific fiscal year (default: most recent)')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (companyArg: string, options: { year?: string; json?: boolean }) => {
+    try {
+      const year = options.year ? validatePositiveInt(options.year, '--year') : undefined;
+
+      const result = await executeSummaryCore({
+        company: companyArg,
+        year,
+      });
+
+      if (!result.success) {
+        const err = result.error!;
+        if (err.type === 'company_ambiguous') {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of err.suggestions!) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(err.message));
+        }
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(renderSummaryJson(result.result!));
+      } else {
+        console.log('');
+        console.log(renderSummaryTable(result.result!));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
     }
   });
 

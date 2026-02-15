@@ -24,7 +24,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { executeQueryCore, executeCompareCore, executeRatioCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore } from './core/query-engine.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
 import { RATIO_DEFINITIONS } from './processing/ratio-definitions.js';
 import { getCacheStats } from './core/cache.js';
@@ -203,6 +203,46 @@ server.tool(
         filing: { accession: t.filing_accession, date: t.filing_date },
       })),
       provenance: result.provenance,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
+  'company_financial_summary',
+  'Get a comprehensive financial summary of a company — all 13 metrics plus derived ratios for a fiscal year. Efficiently uses a single SEC API call.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+    year: z.number().min(2000).max(2030).optional().describe('Specific fiscal year (default: most recent)'),
+  },
+  async ({ company, year }) => {
+    const result = await executeSummaryCore({ company, year });
+
+    if (!result.success) {
+      let errorText = result.error!.message;
+      if (result.error!.suggestions?.length) {
+        errorText += '\n\nDid you mean:\n' +
+          result.error!.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const r = result.result!;
+    const output = {
+      company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
+      fiscal_year: r.fiscal_year,
+      metrics: r.metrics.map(m => ({
+        id: m.metric.id,
+        display_name: m.metric.display_name,
+        value: m.value,
+        yoy_change_pct: m.yoy_change ?? null,
+      })),
+      derived_ratios: r.derived.map(d => ({
+        name: d.name,
+        value: d.value,
+        format: d.format,
+      })),
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };

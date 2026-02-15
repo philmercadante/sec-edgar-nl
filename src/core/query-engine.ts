@@ -12,6 +12,7 @@ import { calculateGrowth } from '../processing/calculations.js';
 import { buildProvenance } from '../analysis/provenance.js';
 import { METRIC_DEFINITIONS, findMetricByName, getMetricDefinition } from '../processing/metric-definitions.js';
 import { RATIO_DEFINITIONS, findRatioByName, type RatioDefinition } from '../processing/ratio-definitions.js';
+import type { SummaryResult } from '../output/summary-renderer.js';
 import type { QueryResult, CompanyInfo, MetricDefinition, DataPoint } from './types.js';
 
 export interface QueryParams {
@@ -368,6 +369,157 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
       data_points: dataPoints,
       numerator_metric: numMetric.display_name,
       denominator_metric: denMetric.display_name,
+    },
+  };
+}
+
+// ── Summary Execution ──────────────────────────────────────────────────
+
+export interface SummaryParams {
+  company: string;
+  year?: number; // Specific FY; default = most recent
+}
+
+export interface SummaryEngineResult {
+  success: boolean;
+  result?: SummaryResult;
+  error?: {
+    type: 'company_not_found' | 'company_ambiguous' | 'no_data' | 'api_error';
+    message: string;
+    suggestions?: Array<{ ticker: string; name: string }>;
+  };
+}
+
+/**
+ * Fetch all metrics for one company and build a financial summary.
+ * Uses a single CompanyFacts API call (subsequent metrics are cache hits).
+ */
+export async function executeSummaryCore(params: SummaryParams): Promise<SummaryEngineResult> {
+  const { company: companyQuery, year: targetYear } = params;
+
+  // Resolve company
+  const resolved = await resolveCompanyWithSuggestions(companyQuery);
+  if (!resolved.company) {
+    if (resolved.suggestions.length > 0) {
+      return {
+        success: false,
+        error: {
+          type: 'company_ambiguous',
+          message: `Ambiguous company: "${companyQuery}"`,
+          suggestions: resolved.suggestions.map(s => ({ ticker: s.ticker, name: s.name })),
+        },
+      };
+    }
+    return {
+      success: false,
+      error: {
+        type: 'company_not_found',
+        message: `Could not find company: "${companyQuery}". Try using a ticker symbol.`,
+      },
+    };
+  }
+
+  const company = resolved.company;
+
+  // Fetch all metrics (first call hits SEC API, rest are cache hits)
+  const metricResults = await Promise.all(
+    METRIC_DEFINITIONS.map(async (metric) => {
+      try {
+        const result = await fetchMetricData(company, metric, 2); // Get 2 years for YoY
+        return { metric, dataPoints: result.dataPoints };
+      } catch {
+        return { metric, dataPoints: [] };
+      }
+    })
+  );
+
+  // Determine the target fiscal year
+  let fiscalYear = targetYear;
+  if (!fiscalYear) {
+    const allYears = metricResults
+      .flatMap(r => r.dataPoints.map(dp => dp.fiscal_year))
+      .filter(y => y > 0);
+    if (allYears.length === 0) {
+      return {
+        success: false,
+        error: { type: 'no_data', message: `No financial data found for ${company.name}` },
+      };
+    }
+    fiscalYear = Math.max(...allYears);
+  }
+
+  // Build summary metrics
+  const metrics: SummaryResult['metrics'] = [];
+  const valuesByMetric = new Map<string, number>();
+
+  for (const { metric, dataPoints } of metricResults) {
+    const current = dataPoints.find(dp => dp.fiscal_year === fiscalYear);
+    if (!current) continue;
+
+    const prior = dataPoints.find(dp => dp.fiscal_year === fiscalYear - 1);
+    let yoyChange: number | undefined;
+    if (prior && prior.value !== 0) {
+      yoyChange = Math.round(((current.value - prior.value) / Math.abs(prior.value)) * 1000) / 10;
+    }
+
+    metrics.push({
+      metric,
+      value: current.value,
+      prior_year_value: prior?.value,
+      yoy_change: yoyChange,
+    });
+
+    valuesByMetric.set(metric.id, current.value);
+  }
+
+  if (metrics.length === 0) {
+    return {
+      success: false,
+      error: { type: 'no_data', message: `No data found for ${company.name} in FY${fiscalYear}` },
+    };
+  }
+
+  // Compute derived ratios
+  const derived: SummaryResult['derived'] = [];
+  const revenue = valuesByMetric.get('revenue');
+  const netIncome = valuesByMetric.get('net_income');
+  const grossProfit = valuesByMetric.get('gross_profit');
+  const operatingIncome = valuesByMetric.get('operating_income');
+  const ocf = valuesByMetric.get('operating_cash_flow');
+  const capex = valuesByMetric.get('capex');
+  const totalDebt = valuesByMetric.get('total_debt');
+  const totalEquity = valuesByMetric.get('total_equity');
+
+  if (revenue && netIncome && revenue !== 0) {
+    derived.push({ name: 'Net Margin', value: Math.round((netIncome / revenue) * 1000) / 10, format: 'percentage' });
+  }
+  if (revenue && grossProfit && revenue !== 0) {
+    derived.push({ name: 'Gross Margin', value: Math.round((grossProfit / revenue) * 1000) / 10, format: 'percentage' });
+  }
+  if (revenue && operatingIncome && revenue !== 0) {
+    derived.push({ name: 'Operating Margin', value: Math.round((operatingIncome / revenue) * 1000) / 10, format: 'percentage' });
+  }
+  if (ocf && capex) {
+    derived.push({ name: 'Free Cash Flow', value: ocf - capex, format: 'currency' });
+  }
+  if (totalDebt && totalEquity && totalEquity !== 0) {
+    derived.push({ name: 'Debt-to-Equity', value: Math.round((totalDebt / totalEquity) * 100) / 100, format: 'multiple' });
+  }
+
+  const companyInfo: CompanyInfo = {
+    cik: company.cik,
+    ticker: company.ticker,
+    name: company.name,
+    fiscal_year_end_month: 0,
+  };
+
+  return {
+    success: true,
+    result: {
+      company: companyInfo,
+      fiscal_year: fiscalYear,
+      metrics,
+      derived,
     },
   };
 }
