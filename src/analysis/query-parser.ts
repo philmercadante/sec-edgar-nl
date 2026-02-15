@@ -8,20 +8,27 @@ import type { MetricDefinition } from '../core/types.js';
  * - "Apple's R&D spending over the last 5 years"
  * - "MSFT revenue"
  * - "Show me Tesla's capital expenditures"
+ * - "AAPL revenue quarterly 8 quarters"
  */
+
+export type PeriodType = 'annual' | 'quarterly';
 
 export interface ParsedQuery {
   company: string;
   metric: MetricDefinition | null;
   years: number;
+  periodType: PeriodType;
+  quarters: number;
   raw: string;
 }
 
 export function parseQuery(input: string): ParsedQuery {
   const raw = input.trim();
 
-  // Extract year count
-  const years = extractYears(raw);
+  // Detect quarterly mode
+  const periodType = detectPeriodType(raw);
+  const years = periodType === 'annual' ? extractYears(raw) : 5;
+  const quarters = periodType === 'quarterly' ? extractQuarters(raw) : 0;
 
   // Extract company
   const company = extractCompany(raw);
@@ -29,7 +36,15 @@ export function parseQuery(input: string): ParsedQuery {
   // Extract metric
   const metric = extractMetric(raw);
 
-  return { company, metric, years, raw };
+  return { company, metric, years, periodType, quarters, raw };
+}
+
+function detectPeriodType(input: string): PeriodType {
+  const lower = input.toLowerCase();
+  if (/\bquarter(ly|s)?\b/i.test(lower)) return 'quarterly';
+  if (/\bq[1-4]\b/i.test(lower)) return 'quarterly';
+  if (/\d+\s*q\b/i.test(lower)) return 'quarterly';
+  return 'annual';
 }
 
 function extractYears(input: string): number {
@@ -51,10 +66,30 @@ function extractYears(input: string): number {
   return 5; // Default
 }
 
+function extractQuarters(input: string): number {
+  // "8 quarters", "last 12 quarters", "4q"
+  const quarterPatterns = [
+    /(?:last|past|previous)\s+(\d+)\s*quarters?/i,
+    /(\d+)\s*quarters?/i,
+    /(\d+)\s*q\b/i,
+  ];
+
+  for (const pattern of quarterPatterns) {
+    const match = input.match(pattern);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n >= 1 && n <= 40) return n;
+    }
+  }
+
+  return 8; // Default for quarterly
+}
+
 function extractCompany(input: string): string {
   const cleaned = input
     .replace(/^(?:show\s+me|what\s+is|what\s+are|how\s+has|how\s+have|get|fetch|find)\s+/i, '')
-    .replace(/\s*(?:over\s+the\s+)?(?:last|past|previous)\s+\d+\s*(?:fiscal\s+)?years?\s*/i, '')
+    .replace(/\s*(?:over\s+the\s+)?(?:last|past|previous)\s+\d+\s*(?:fiscal\s+)?(?:years?|quarters?)\s*/i, '')
+    .replace(/\bquarterly\b/gi, '')
     .replace(/[''`]/g, "'");
 
   // Try "Company's metric" pattern
@@ -87,10 +122,11 @@ function extractMetric(input: string): MetricDefinition | null {
   const cleaned = lower
     .replace(/^(?:show\s+me|what\s+is|what\s+are|how\s+has|how\s+have|get|fetch|find)\s+/i, '')
     .replace(/\b[a-z]{1,5}'s\b/i, '')
-    .replace(/\s*(?:over\s+the\s+)?(?:last|past|previous)\s+\d+\s*(?:fiscal\s+)?years?\s*/i, '')
+    .replace(/\s*(?:over\s+the\s+)?(?:last|past|previous)\s+\d+\s*(?:fiscal\s+)?(?:years?|quarters?)\s*/i, '')
     .replace(/\bfor\s+\w+/i, '')
     .replace(/\bchanged\b/i, '')
     .replace(/\bspending\b/i, '')
+    .replace(/\bquarterly\b/gi, '')
     .trim();
 
   return findMetricByName(cleaned) ?? findMetricByName(lower);

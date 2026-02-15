@@ -3,15 +3,19 @@ import type { QueryResult } from '../core/types.js';
 
 /**
  * Renders query results as formatted terminal tables with provenance.
- * Matches the golden test output format from the plan.
+ * Supports both annual (FY) and quarterly (Q1-Q4) display.
  */
 
 export function renderTable(result: QueryResult): string {
   const { company, metric, data_points, calculations, provenance } = result;
+  const isQuarterly = data_points.some(dp => dp.fiscal_period !== 'FY');
   const lines: string[] = [];
 
   // Header
-  const header = `${company.name} (${company.ticker}) — ${metric.display_name} (Last ${data_points.length} Fiscal Years)`;
+  const periodLabel = isQuarterly
+    ? `Last ${data_points.length} Quarters`
+    : `Last ${data_points.length} Fiscal Years`;
+  const header = `${company.name} (${company.ticker}) — ${metric.display_name} (${periodLabel})`;
   lines.push(chalk.bold(header));
   lines.push(chalk.dim('='.repeat(header.length)));
   lines.push('');
@@ -24,25 +28,40 @@ export function renderTable(result: QueryResult): string {
   );
 
   // Table header
-  const colFY = 'Fiscal Year';
+  const colPeriod = isQuarterly ? 'Quarter' : 'Fiscal Year';
   const colValue = metric.display_name;
-  const colChange = 'YoY Change';
-  lines.push(`  ${chalk.underline(padRight(colFY, 14))}${chalk.underline(padRight(colValue, valueColWidth))}${chalk.underline(padRight(colChange, 12))}`);
+  const colChange = isQuarterly ? 'QoQ Change' : 'YoY Change';
+  lines.push(`  ${chalk.underline(padRight(colPeriod, 14))}${chalk.underline(padRight(colValue, valueColWidth))}${chalk.underline(padRight(colChange, 12))}`);
 
   // Table rows
-  for (const dp of data_points) {
-    const yoy = calculations.yoy_changes.find(y => y.year === dp.fiscal_year);
-    const changeStr = yoy?.change_pct != null
-      ? formatChange(yoy.change_pct)
-      : '--';
+  for (let i = 0; i < data_points.length; i++) {
+    const dp = data_points[i];
+    const periodStr = isQuarterly
+      ? `${dp.fiscal_period} ${dp.fiscal_year}`
+      : `FY${dp.fiscal_year}`;
 
-    lines.push(`  ${padRight(`FY${dp.fiscal_year}`, 14)}${padRight(formatCurrency(dp.value), valueColWidth)}${changeStr}`);
+    let changeStr = '--';
+    if (i > 0) {
+      const yoy = calculations.yoy_changes.find(y => y.year === dp.fiscal_year);
+      if (isQuarterly) {
+        // For quarterly, compute sequential QoQ
+        const prev = data_points[i - 1].value;
+        if (prev !== 0 && !((prev > 0 && dp.value < 0) || (prev < 0 && dp.value > 0))) {
+          const change = ((dp.value - prev) / Math.abs(prev)) * 100;
+          changeStr = formatChange(Math.round(change * 10) / 10);
+        }
+      } else if (yoy?.change_pct != null) {
+        changeStr = formatChange(yoy.change_pct);
+      }
+    }
+
+    lines.push(`  ${padRight(periodStr, 14)}${padRight(formatCurrency(dp.value), valueColWidth)}${changeStr}`);
   }
 
   lines.push('');
 
-  // CAGR
-  if (calculations.cagr != null) {
+  // CAGR (annual only)
+  if (!isQuarterly && calculations.cagr != null) {
     lines.push(`  ${calculations.cagr_years}-Year CAGR: ${chalk.bold(calculations.cagr.toFixed(1) + '%')}`);
     lines.push('');
   }
@@ -65,7 +84,7 @@ export function renderTable(result: QueryResult): string {
   return lines.join('\n');
 }
 
-function formatCurrency(value: number): string {
+export function formatCurrency(value: number): string {
   const abs = Math.abs(value);
   const sign = value < 0 ? '-' : '';
 
@@ -84,7 +103,6 @@ function formatChange(pct: number): string {
 }
 
 function padRight(str: string, len: number): string {
-  // Strip ANSI for length calculation
   const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
   const padding = Math.max(0, len - stripped.length);
   return str + ' '.repeat(padding);

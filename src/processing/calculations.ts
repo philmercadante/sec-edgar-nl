@@ -18,6 +18,10 @@ export function calculateGrowth(dataPoints: DataPoint[]): Calculations {
     if (prev === 0) {
       return { year: dp.fiscal_year, change_pct: null };
     }
+    // Return null for sign changes — YoY % is meaningless across sign flips
+    if ((prev > 0 && dp.value < 0) || (prev < 0 && dp.value > 0)) {
+      return { year: dp.fiscal_year, change_pct: null };
+    }
     const change = ((dp.value - prev) / Math.abs(prev)) * 100;
     return { year: dp.fiscal_year, change_pct: Math.round(change * 10) / 10 };
   });

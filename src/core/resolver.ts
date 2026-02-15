@@ -6,6 +6,12 @@ import type { CikLookup } from './types.js';
  *
  * Uses SEC's company tickers JSON endpoint which maps all tickers to CIKs.
  * This is cached aggressively since tickers rarely change.
+ *
+ * Resolution order:
+ * 1. Exact ticker match (AAPL)
+ * 2. Common aliases (Apple -> AAPL)
+ * 3. Exact company name match
+ * 4. Fuzzy name match (substring)
  */
 
 const TICKERS_URL = 'https://www.sec.gov/files/company_tickers.json';
@@ -23,7 +29,13 @@ let nameMap: Map<string, CikLookup> | null = null;
 async function loadTickers(): Promise<void> {
   if (tickerMap && nameMap) return;
 
-  let body = getCached(TICKERS_URL);
+  let body: string | null = null;
+  try {
+    body = getCached(TICKERS_URL);
+  } catch {
+    // Cache read failed — proceed to fetch
+  }
+
   if (!body) {
     const response = await fetch(TICKERS_URL, {
       headers: {
@@ -31,9 +43,13 @@ async function loadTickers(): Promise<void> {
         'Accept': 'application/json',
       },
     });
-    if (!response.ok) throw new Error(`Failed to fetch tickers: ${response.status}`);
+    if (!response.ok) throw new Error(`Failed to fetch company tickers from SEC (${response.status}). Check your network connection.`);
     body = await response.text();
-    setCache(TICKERS_URL, body, 168); // 7 days
+    try {
+      setCache(TICKERS_URL, body, 168); // 7 days
+    } catch {
+      // Cache write failed — non-fatal
+    }
   }
 
   const data = JSON.parse(body) as Record<string, SecTickerEntry>;
@@ -51,24 +67,82 @@ async function loadTickers(): Promise<void> {
   }
 }
 
+// Common aliases: colloquial name -> ticker
+const ALIASES: Record<string, string> = {
+  'apple': 'AAPL',
+  'microsoft': 'MSFT',
+  'google': 'GOOGL',
+  'alphabet': 'GOOGL',
+  'amazon': 'AMZN',
+  'tesla': 'TSLA',
+  'meta': 'META',
+  'facebook': 'META',
+  'nvidia': 'NVDA',
+  'netflix': 'NFLX',
+  'berkshire': 'BRK-B',
+  'jpmorgan': 'JPM',
+  'jp morgan': 'JPM',
+  'johnson & johnson': 'JNJ',
+  'j&j': 'JNJ',
+  'disney': 'DIS',
+  'walmart': 'WMT',
+  'paypal': 'PYPL',
+  'intel': 'INTC',
+  'amd': 'AMD',
+  'salesforce': 'CRM',
+  'adobe': 'ADBE',
+  'uber': 'UBER',
+  'airbnb': 'ABNB',
+  'snapchat': 'SNAP',
+  'snap': 'SNAP',
+  'spotify': 'SPOT',
+  'twitter': 'X',
+  'coinbase': 'COIN',
+  'palantir': 'PLTR',
+  'crowdstrike': 'CRWD',
+  'snowflake': 'SNOW',
+  'datadog': 'DDOG',
+};
+
+export interface ResolveResult {
+  company: CikLookup | null;
+  suggestions: CikLookup[];
+}
+
 /**
  * Resolve a company identifier (ticker or name) to CIK info.
- * Tries exact ticker match first, then fuzzy name match.
+ * Returns the match plus suggestions if ambiguous.
  */
 export async function resolveCompany(query: string): Promise<CikLookup | null> {
+  const result = await resolveCompanyWithSuggestions(query);
+  return result.company;
+}
+
+/**
+ * Resolve with full context — returns suggestions for ambiguous matches.
+ */
+export async function resolveCompanyWithSuggestions(query: string): Promise<ResolveResult> {
   await loadTickers();
 
-  // Exact ticker match
   const upper = query.toUpperCase().trim();
-  const byTicker = tickerMap!.get(upper);
-  if (byTicker) return byTicker;
-
-  // Exact name match
   const lower = query.toLowerCase().trim();
-  const byName = nameMap!.get(lower);
-  if (byName) return byName;
 
-  // Fuzzy name match — find names containing the query
+  // 1. Exact ticker match
+  const byTicker = tickerMap!.get(upper);
+  if (byTicker) return { company: byTicker, suggestions: [] };
+
+  // 2. Common alias
+  const alias = ALIASES[lower];
+  if (alias) {
+    const byAlias = tickerMap!.get(alias);
+    if (byAlias) return { company: byAlias, suggestions: [] };
+  }
+
+  // 3. Exact name match
+  const byName = nameMap!.get(lower);
+  if (byName) return { company: byName, suggestions: [] };
+
+  // 4. Fuzzy name match — find names containing the query
   const matches: CikLookup[] = [];
   for (const [name, lookup] of nameMap!) {
     if (name.includes(lower)) {
@@ -76,28 +150,14 @@ export async function resolveCompany(query: string): Promise<CikLookup | null> {
     }
   }
 
-  // Common aliases
-  const aliases: Record<string, string> = {
-    'apple': 'AAPL',
-    'microsoft': 'MSFT',
-    'google': 'GOOGL',
-    'alphabet': 'GOOGL',
-    'amazon': 'AMZN',
-    'tesla': 'TSLA',
-    'meta': 'META',
-    'facebook': 'META',
-    'nvidia': 'NVDA',
-    'netflix': 'NFLX',
-  };
-
-  const alias = aliases[lower];
-  if (alias) {
-    const byAlias = tickerMap!.get(alias);
-    if (byAlias) return byAlias;
+  if (matches.length === 1) {
+    return { company: matches[0], suggestions: [] };
   }
 
-  // Return first fuzzy match if only one, otherwise null (ambiguous)
-  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    // Return top 5 as suggestions, no auto-pick
+    return { company: null, suggestions: matches.slice(0, 5) };
+  }
 
-  return null;
+  return { company: null, suggestions: [] };
 }

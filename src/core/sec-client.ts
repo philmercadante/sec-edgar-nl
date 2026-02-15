@@ -1,5 +1,6 @@
 import { RateLimiter } from './rate-limiter.js';
 import { getCached, setCache } from './cache.js';
+import { SecApiError, NotFoundError, RateLimitError, DataParseError } from './errors.js';
 import type { CompanyFacts, SecFact } from './types.js';
 
 /**
@@ -7,52 +8,107 @@ import type { CompanyFacts, SecFact } from './types.js';
  *
  * Uses the free EDGAR APIs:
  * - data.sec.gov/api/xbrl/companyfacts/ for XBRL data
- * - efts.sec.gov/LATEST/search-index for ticker->CIK lookup
  *
  * Rate limited to 10 req/s per SEC fair access policy.
+ * Implements exponential backoff for 429 responses.
  */
 
 const BASE_URL = 'https://data.sec.gov';
 const USER_AGENT = process.env.SEC_USER_AGENT || 'sec-edgar-nl contact@sec-edgar-nl.dev';
+const MAX_RETRIES = 3;
 
 const rateLimiter = new RateLimiter(10);
 
 async function fetchWithRateLimit(url: string, cacheTtlHours: number = 24): Promise<string> {
-  // Check cache first
-  const cached = getCached(url);
-  if (cached !== null) return cached;
-
-  await rateLimiter.acquire();
-
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      'Accept': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(`Not found: ${url}`);
-    }
-    if (response.status === 429) {
-      // Rate limited — wait and retry once
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await rateLimiter.acquire();
-      const retry = await fetch(url, {
-        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
-      });
-      if (!retry.ok) throw new Error(`SEC API error after retry: ${retry.status}`);
-      const body = await retry.text();
-      setCache(url, body, cacheTtlHours);
-      return body;
-    }
-    throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
+  // Check cache first (with error resilience)
+  try {
+    const cached = getCached(url);
+    if (cached !== null) return cached;
+  } catch {
+    // Cache read failed (corruption, locked) — proceed without cache
   }
 
-  const body = await response.text();
-  setCache(url, body, cacheTtlHours);
-  return body;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    await rateLimiter.acquire();
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept': 'application/json',
+        },
+      });
+    } catch (err) {
+      lastError = new SecApiError(
+        `Network error fetching ${url}: ${err instanceof Error ? err.message : String(err)}`,
+        0,
+        url
+      );
+      // Network error — retry with backoff
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+
+    if (response.ok) {
+      const body = await response.text();
+      try {
+        setCache(url, body, cacheTtlHours);
+      } catch {
+        // Cache write failed — non-fatal, continue
+      }
+      return body;
+    }
+
+    if (response.status === 404) {
+      throw new NotFoundError(url);
+    }
+
+    if (response.status === 429) {
+      lastError = new RateLimitError(url);
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+
+    if (response.status === 403) {
+      throw new SecApiError(
+        'SEC API rejected request (403 Forbidden). Check your SEC_USER_AGENT environment variable — SEC requires a valid User-Agent with contact info.',
+        403,
+        url
+      );
+    }
+
+    if (response.status >= 500) {
+      lastError = new SecApiError(
+        `SEC server error: ${response.status}`,
+        response.status,
+        url
+      );
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+
+    throw new SecApiError(
+      `SEC API error: ${response.status} ${response.statusText}`,
+      response.status,
+      url
+    );
+  }
+
+  throw lastError ?? new SecApiError(`Failed after ${MAX_RETRIES} retries`, 0, url);
+}
+
+/** Exponential backoff with jitter: 1s, 2s, 4s */
+function backoffMs(attempt: number): number {
+  const base = 1000 * Math.pow(2, attempt);
+  const jitter = Math.random() * 500;
+  return base + jitter;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -62,8 +118,16 @@ async function fetchWithRateLimit(url: string, cacheTtlHours: number = 24): Prom
 export async function getCompanyFacts(cik: string): Promise<CompanyFacts> {
   const paddedCik = cik.padStart(10, '0');
   const url = `${BASE_URL}/api/xbrl/companyfacts/CIK${paddedCik}.json`;
-  const body = await fetchWithRateLimit(url, 168); // Cache for 7 days — filings don't change often
-  return JSON.parse(body) as CompanyFacts;
+  const body = await fetchWithRateLimit(url, 168); // Cache for 7 days
+
+  try {
+    return JSON.parse(body) as CompanyFacts;
+  } catch {
+    throw new DataParseError(
+      `Failed to parse SEC response for CIK ${cik}. The data may be corrupted or the API format may have changed.`,
+      url
+    );
+  }
 }
 
 /**
