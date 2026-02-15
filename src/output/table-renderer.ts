@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { QueryResult } from '../core/types.js';
+import { padRight } from './format-utils.js';
 
 /**
  * Renders query results as formatted terminal tables with provenance.
@@ -142,8 +143,3 @@ export function sparkline(values: number[]): string {
   }).join('');
 }
 
-function padRight(str: string, len: number): string {
-  const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, len - stripped.length);
-  return str + ' '.repeat(padding);
-}

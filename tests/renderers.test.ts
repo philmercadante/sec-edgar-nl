@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { formatCurrency, formatShareCount, sparkline, renderTable } from '../src/output/table-renderer.js';
 import { renderRatioJson, renderRatioCsv, renderRatioTable, renderCompareRatioTable, renderCompareRatioCsv } from '../src/output/ratio-renderer.js';
 import { renderFilingJson, type FilingListResult } from '../src/output/filing-renderer.js';
-import { renderSummaryJson, type SummaryResult } from '../src/output/summary-renderer.js';
+import { renderSummaryJson, renderSummaryTable, renderSummaryTrendTable, type SummaryResult } from '../src/output/summary-renderer.js';
 import { renderCsv, renderComparisonCsv } from '../src/output/csv-renderer.js';
 import { renderJson } from '../src/output/json-renderer.js';
-import type { RatioResult } from '../src/core/query-engine.js';
+import { renderComparison, renderComparisonJson } from '../src/output/comparison-renderer.js';
+import { renderScreenTable, renderScreenJson, renderScreenCsv } from '../src/output/screen-renderer.js';
+import { padRight, csvEscape } from '../src/output/format-utils.js';
+import type { RatioResult, ScreenResult } from '../src/core/query-engine.js';
 import type { QueryResult, MetricDefinition } from '../src/core/types.js';
 
 const mockMetric: MetricDefinition = {
@@ -408,5 +411,253 @@ describe('formatShareCount edge cases', () => {
     expect(formatShareCount(1e9)).toBe('1.00B');
     expect(formatShareCount(1e6)).toBe('1.00M');
     expect(formatShareCount(1e3)).toBe('1.0K');
+  });
+});
+
+// ── format-utils tests ─────────────────────────────────────────────
+
+describe('padRight', () => {
+  it('pads short strings', () => {
+    expect(padRight('abc', 6)).toBe('abc   ');
+  });
+
+  it('does not truncate long strings', () => {
+    expect(padRight('abcdef', 3)).toBe('abcdef');
+  });
+
+  it('handles exact length', () => {
+    expect(padRight('abc', 3)).toBe('abc');
+  });
+
+  it('strips ANSI codes when computing width', () => {
+    const colored = '\x1b[31mred\x1b[0m';
+    const result = padRight(colored, 6);
+    // "red" is 3 chars, so 3 spaces of padding
+    expect(result).toBe(colored + '   ');
+  });
+});
+
+describe('csvEscape', () => {
+  it('returns plain strings unchanged', () => {
+    expect(csvEscape('hello')).toBe('hello');
+  });
+
+  it('quotes strings with commas', () => {
+    expect(csvEscape('foo,bar')).toBe('"foo,bar"');
+  });
+
+  it('quotes and escapes strings with quotes', () => {
+    expect(csvEscape('say "hi"')).toBe('"say ""hi"""');
+  });
+
+  it('quotes strings with newlines', () => {
+    expect(csvEscape('line1\nline2')).toBe('"line1\nline2"');
+  });
+});
+
+// ── Screen renderer tests ──────────────────────────────────────────
+
+describe('renderScreenJson', () => {
+  const mockScreen: ScreenResult = {
+    metric: mockMetric,
+    period: 'CY2024',
+    total_companies: 100,
+    filtered_companies: 3,
+    companies: [
+      { cik: 320193, entity_name: 'Apple Inc.', location: 'CA', value: 391e9, period_start: '2023-10-01', period_end: '2024-09-28', accession_number: 'accn1' },
+      { cik: 789019, entity_name: 'Microsoft Corp', location: 'WA', value: 245e9, period_start: '2024-07-01', period_end: '2025-06-30', accession_number: 'accn2' },
+    ],
+  };
+
+  it('produces valid JSON with company data', () => {
+    const json = JSON.parse(renderScreenJson(mockScreen));
+    expect(json.period).toBe('CY2024');
+    expect(json.total_companies).toBe(100);
+    expect(json.companies).toHaveLength(2);
+    expect(json.companies[0].entity_name).toBe('Apple Inc.');
+  });
+});
+
+describe('renderScreenCsv', () => {
+  const mockScreen: ScreenResult = {
+    metric: mockMetric,
+    period: 'CY2024',
+    total_companies: 50,
+    filtered_companies: 2,
+    companies: [
+      { cik: 320193, entity_name: 'Apple Inc.', location: 'CA', value: 391e9, period_start: '2023-10-01', period_end: '2024-09-28', accession_number: 'accn1' },
+      { cik: 12345, entity_name: 'Foo, Bar & Co', location: 'NY', value: 10e9, period_start: '2024-01-01', period_end: '2024-12-31', accession_number: 'accn2' },
+    ],
+  };
+
+  it('outputs CSV with header', () => {
+    const csv = renderScreenCsv(mockScreen);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('rank,cik,entity_name,location,value,period_start,period_end,accession_number');
+    expect(lines).toHaveLength(3);
+  });
+
+  it('escapes company names with commas', () => {
+    const csv = renderScreenCsv(mockScreen);
+    const lines = csv.split('\n');
+    expect(lines[2]).toContain('"Foo, Bar & Co"');
+  });
+});
+
+describe('renderScreenTable', () => {
+  const mockScreen: ScreenResult = {
+    metric: mockMetric,
+    period: 'CY2024',
+    total_companies: 100,
+    filtered_companies: 1,
+    companies: [
+      { cik: 320193, entity_name: 'Apple Inc.', location: 'CA', value: 391e9, period_start: '2023-10-01', period_end: '2024-09-28', accession_number: 'accn1' },
+    ],
+  };
+
+  it('includes company data', () => {
+    const output = renderScreenTable(mockScreen);
+    expect(output).toContain('Apple Inc.');
+    expect(output).toContain('CY2024');
+  });
+});
+
+// ── Comparison renderer tests ──────────────────────────────────────
+
+describe('renderComparison', () => {
+  function makeQueryResult(ticker: string, name: string, values: [number, number][]): QueryResult {
+    return {
+      company: { cik: '123', ticker, name, fiscal_year_end_month: 0 },
+      metric: mockMetric,
+      data_points: values.map(([fy, val]) => ({
+        metric_id: 'revenue', cik: '123', company_name: name,
+        fiscal_year: fy, fiscal_period: 'FY' as const, period_start: `${fy - 1}-01-01`, period_end: `${fy}-12-31`,
+        value: val, unit: 'USD',
+        source: { accession_number: `accn-${fy}`, filing_date: `${fy + 1}-02-01`, form_type: '10-K', xbrl_concept: 'us-gaap:Revenues' },
+        restated_in: null, is_latest: true, extracted_at: '2025-01-01', checksum: 'test',
+      })),
+      calculations: { yoy_changes: [], cagr: 5.0, cagr_years: 3 },
+      provenance: { metric_concept: 'us-gaap:Revenues', filings_used: [], dedup_strategy: 'test', period_type: 'annual', notes: [] },
+    };
+  }
+
+  it('returns empty string for no results', () => {
+    expect(renderComparison([])).toBe('');
+  });
+
+  it('renders single company as regular table', () => {
+    const result = makeQueryResult('AAPL', 'Apple Inc.', [[2023, 383e9], [2024, 391e9]]);
+    const output = renderComparison([result]);
+    expect(output).toContain('Apple Inc.');
+    // Single company renders via renderTable, which includes provenance
+    expect(output).toContain('Provenance');
+  });
+
+  it('renders multi-company comparison with sparklines', () => {
+    const aapl = makeQueryResult('AAPL', 'Apple Inc.', [[2022, 300e9], [2023, 383e9], [2024, 391e9]]);
+    const msft = makeQueryResult('MSFT', 'Microsoft Corp', [[2022, 198e9], [2023, 211e9], [2024, 245e9]]);
+    const output = renderComparison([aapl, msft]);
+    expect(output).toContain('AAPL');
+    expect(output).toContain('MSFT');
+    expect(output).toContain('CAGR');
+    expect(output).toContain('Trend');
+  });
+});
+
+describe('renderComparisonJson', () => {
+  it('produces valid JSON', () => {
+    const result: QueryResult = {
+      company: { cik: '123', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+      metric: mockMetric,
+      data_points: [],
+      calculations: { yoy_changes: [], cagr: null, cagr_years: 0 },
+      provenance: { metric_concept: 'test', filings_used: [], dedup_strategy: 'test', period_type: 'annual', notes: [] },
+    };
+    const json = JSON.parse(renderComparisonJson([result]));
+    expect(json.comparison).toHaveLength(1);
+    expect(json.comparison[0].company.ticker).toBe('AAPL');
+  });
+});
+
+// ── Summary renderer tests ─────────────────────────────────────────
+
+describe('renderSummaryTable', () => {
+  const mockSummary: SummaryResult = {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    fiscal_year: 2024,
+    metrics: [
+      { metric: mockMetric, value: 391e9, prior_year_value: 383e9, yoy_change: 2.1 },
+      {
+        metric: { ...mockMetric, id: 'net_income', display_name: 'Net Income' },
+        value: 94e9,
+        prior_year_value: 97e9,
+        yoy_change: -3.1,
+      },
+    ],
+    derived: [
+      { name: 'Net Margin', value: 24.0, format: 'percentage' },
+      { name: 'Free Cash Flow', value: 100e9, format: 'currency' },
+      { name: 'Current Ratio', value: 1.07, format: 'multiple' },
+    ],
+  };
+
+  it('includes company name and fiscal year', () => {
+    const output = renderSummaryTable(mockSummary);
+    expect(output).toContain('Apple Inc.');
+    expect(output).toContain('FY2024');
+  });
+
+  it('groups by statement type', () => {
+    const output = renderSummaryTable(mockSummary);
+    expect(output).toContain('Income Statement');
+  });
+
+  it('includes derived ratios', () => {
+    const output = renderSummaryTable(mockSummary);
+    expect(output).toContain('Net Margin');
+    expect(output).toContain('24.0%');
+    expect(output).toContain('1.07x');
+  });
+});
+
+describe('renderSummaryTrendTable', () => {
+  const mockTrend: SummaryResult = {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    fiscal_year: 2024,
+    metrics: [
+      {
+        metric: mockMetric,
+        value: 391e9,
+        year_values: [
+          { fiscal_year: 2022, value: 365e9 },
+          { fiscal_year: 2023, value: 383e9 },
+          { fiscal_year: 2024, value: 391e9 },
+        ],
+      },
+    ],
+    derived: [],
+  };
+
+  it('shows multi-year column headers', () => {
+    const output = renderSummaryTrendTable(mockTrend);
+    expect(output).toContain('FY2022');
+    expect(output).toContain('FY2023');
+    expect(output).toContain('FY2024');
+  });
+
+  it('includes company name in header', () => {
+    const output = renderSummaryTrendTable(mockTrend);
+    expect(output).toContain('Apple Inc.');
+    expect(output).toContain('Financial Trend');
+  });
+
+  it('falls back to summary table when no year_values', () => {
+    const noTrend: SummaryResult = {
+      ...mockTrend,
+      metrics: [{ metric: mockMetric, value: 391e9 }],
+    };
+    const output = renderSummaryTrendTable(noTrend);
+    // Falls back to renderSummaryTable format
+    expect(output).toContain('Financial Summary');
   });
 });

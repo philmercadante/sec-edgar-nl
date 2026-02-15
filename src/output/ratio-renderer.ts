@@ -1,5 +1,6 @@
 import chalk from 'chalk';
-import { formatCurrency } from './table-renderer.js';
+import { formatCurrency, sparkline } from './table-renderer.js';
+import { padRight } from './format-utils.js';
 import type { RatioResult } from '../core/query-engine.js';
 
 export function renderRatioTable(result: RatioResult): string {
@@ -221,23 +222,3 @@ function colorPct(value: number): string {
   return str;
 }
 
-/** Generate a Unicode sparkline from a series of values */
-function sparkline(values: number[]): string {
-  if (values.length < 2) return '';
-  const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min;
-  if (range === 0) return blocks[4].repeat(values.length);
-
-  return values.map(v => {
-    const idx = Math.round(((v - min) / range) * (blocks.length - 1));
-    return blocks[idx];
-  }).join('');
-}
-
-function padRight(str: string, len: number): string {
-  const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, len - stripped.length);
-  return str + ' '.repeat(padding);
-}

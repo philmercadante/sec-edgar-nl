@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { formatCurrency, formatShareCount } from './table-renderer.js';
+import { padRight } from './format-utils.js';
 import type { CompanyInfo, MetricDefinition } from '../core/types.js';
 
 export interface SummaryDataPoint {
@@ -208,8 +209,3 @@ export function renderSummaryTrendTable(result: SummaryResult): string {
   return lines.join('\n');
 }
 
-function padRight(str: string, len: number): string {
-  const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, len - stripped.length);
-  return str + ' '.repeat(padding);
-}

@@ -1,5 +1,6 @@
 import chalk from 'chalk';
-import { renderTable, formatCurrency, formatShareCount } from './table-renderer.js';
+import { renderTable, formatCurrency, formatShareCount, sparkline } from './table-renderer.js';
+import { padRight } from './format-utils.js';
 import type { QueryResult } from '../core/types.js';
 
 /**
@@ -60,6 +61,20 @@ export function renderComparison(results: QueryResult[]): string {
 
   lines.push('');
 
+  // Sparkline row (per company)
+  if (years.length >= 3) {
+    let sparkRow = `  ${padRight('Trend', fyColWidth)}`;
+    for (const r of results) {
+      const values = years.map(y => {
+        const dp = r.data_points.find(d => d.fiscal_year === y);
+        return dp?.value;
+      }).filter((v): v is number => v !== undefined);
+
+      sparkRow += padRight(values.length >= 2 ? sparkline(values) : chalk.dim('--'), companyColWidth);
+    }
+    lines.push(sparkRow);
+  }
+
   // CAGR row
   let cagrRow = `  ${padRight('CAGR', fyColWidth)}`;
   for (const r of results) {
@@ -100,8 +115,3 @@ export function renderComparisonJson(results: QueryResult[]): string {
   }, null, 2);
 }
 
-function padRight(str: string, len: number): string {
-  const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, len - stripped.length);
-  return str + ' '.repeat(padding);
-}
