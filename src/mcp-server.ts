@@ -6,10 +6,11 @@
  * Exposes SEC EDGAR financial data as MCP tools that Claude Desktop,
  * Claude Code, and other MCP clients can use directly.
  *
- * Tools (14):
+ * Tools (15):
  *   - query_financial_metric: fetch a metric for one company
  *   - compare_companies: compare a metric across multiple companies
  *   - compare_metrics: compare multiple metrics for one company
+ *   - financial_matrix: multi-company x multi-metric matrix view
  *   - compare_ratios: compare a ratio across multiple companies
  *   - query_financial_ratio: compute a derived financial ratio
  *   - company_financial_summary: all metrics for one company
@@ -34,7 +35,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore, executeMatrixCore } from './core/query-engine.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
 import { RATIO_DEFINITIONS } from './processing/ratio-definitions.js';
 import { getCacheStats } from './core/cache.js';
@@ -597,6 +598,47 @@ server.tool(
       metrics: r.metrics,
       years: r.years,
       data,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
+  'financial_matrix',
+  'Compare multiple financial metrics across multiple companies in a single view. Shows a matrix with companies as columns and metrics as rows for the most recent fiscal year.',
+  {
+    tickers: z.array(z.string()).min(2).max(10).describe('Array of ticker symbols (e.g., ["AAPL", "MSFT", "GOOGL"])'),
+    metrics: z.array(z.enum(METRIC_IDS)).min(1).max(10).describe('Array of metric IDs (e.g., ["revenue", "net_income", "operating_cash_flow"])'),
+    year: z.number().min(2000).max(2030).optional().describe('Specific fiscal year (default: most recent)'),
+  },
+  async ({ tickers, metrics, year }) => {
+    const result = await executeMatrixCore({ tickers, metrics, year });
+
+    if (!result.success) {
+      let errorText = result.error!.message;
+      if (result.error!.availableMetrics) {
+        errorText += '\n\nAvailable metrics:\n' +
+          result.error!.availableMetrics.map(m => `  ${m.id} — ${m.display_name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const r = result.result!;
+    const companies = r.companies.map(c => {
+      const values: Record<string, number> = {};
+      for (const [k, v] of c.values) values[k] = v;
+      return {
+        company: { cik: c.company.cik, ticker: c.company.ticker, name: c.company.name },
+        values,
+      };
+    });
+
+    const output = {
+      fiscal_year: r.fiscal_year,
+      metrics: r.metrics,
+      companies,
+      warnings: result.errors.length > 0 ? result.errors.map(e => `${e.ticker}: ${e.message}`) : undefined,
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };

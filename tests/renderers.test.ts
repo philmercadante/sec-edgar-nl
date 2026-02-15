@@ -12,7 +12,8 @@ import { renderScreenTable, renderScreenJson, renderScreenCsv } from '../src/out
 import { padRight, csvEscape } from '../src/output/format-utils.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from '../src/output/multi-metric-renderer.js';
 import { renderSearchCsv } from '../src/output/search-renderer.js';
-import type { RatioResult, ScreenResult, MultiMetricResult } from '../src/core/query-engine.js';
+import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from '../src/output/matrix-renderer.js';
+import type { RatioResult, ScreenResult, MultiMetricResult, MatrixResult } from '../src/core/query-engine.js';
 import type { QueryResult, MetricDefinition } from '../src/core/types.js';
 
 const mockMetric: MetricDefinition = {
@@ -1043,5 +1044,125 @@ describe('renderSearchCsv', () => {
     const csv = renderSearchCsv({ total: 0, hits: [] });
     const lines = csv.split('\n');
     expect(lines).toHaveLength(1); // Just header
+  });
+});
+
+// ── Matrix renderer tests ──────────────────────────────────────────
+
+const mockMatrix: MatrixResult = {
+  metrics: [
+    { id: 'revenue', display_name: 'Revenue', unit_type: 'currency' },
+    { id: 'net_income', display_name: 'Net Income', unit_type: 'currency' },
+  ],
+  fiscal_year: 2024,
+  companies: [
+    {
+      company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+      values: new Map([['revenue', 391e9], ['net_income', 94e9]]),
+    },
+    {
+      company: { cik: '789019', ticker: 'MSFT', name: 'Microsoft Corp', fiscal_year_end_month: 0 },
+      values: new Map([['revenue', 245e9], ['net_income', 88e9]]),
+    },
+  ],
+};
+
+describe('renderMatrixTable', () => {
+  it('includes header with fiscal year', () => {
+    const output = renderMatrixTable(mockMatrix);
+    expect(output).toContain('FY2024');
+    expect(output).toContain('Financial Matrix');
+  });
+
+  it('includes company tickers as columns', () => {
+    const output = renderMatrixTable(mockMatrix);
+    expect(output).toContain('AAPL');
+    expect(output).toContain('MSFT');
+  });
+
+  it('includes metric names as rows', () => {
+    const output = renderMatrixTable(mockMatrix);
+    expect(output).toContain('Revenue');
+    expect(output).toContain('Net Income');
+  });
+
+  it('formats currency values', () => {
+    const output = renderMatrixTable(mockMatrix);
+    expect(output).toContain('$391.00B');
+    expect(output).toContain('$245.00B');
+  });
+
+  it('handles empty data', () => {
+    const empty: MatrixResult = { ...mockMatrix, companies: [], metrics: [] };
+    const output = renderMatrixTable(empty);
+    expect(output).toContain('No data found');
+  });
+
+  it('shows -- for missing metric values', () => {
+    const partial: MatrixResult = {
+      ...mockMatrix,
+      companies: [{
+        company: { cik: '1', ticker: 'TEST', name: 'Test', fiscal_year_end_month: 0 },
+        values: new Map([['revenue', 100e9]]), // net_income missing
+      }],
+    };
+    const output = renderMatrixTable(partial);
+    expect(output).toContain('--');
+  });
+});
+
+describe('renderMatrixJson', () => {
+  it('produces valid JSON with correct structure', () => {
+    const json = JSON.parse(renderMatrixJson(mockMatrix));
+    expect(json.fiscal_year).toBe(2024);
+    expect(json.metrics).toHaveLength(2);
+    expect(json.companies).toHaveLength(2);
+  });
+
+  it('includes company values', () => {
+    const json = JSON.parse(renderMatrixJson(mockMatrix));
+    expect(json.companies[0].company.ticker).toBe('AAPL');
+    expect(json.companies[0].values.revenue).toBe(391e9);
+    expect(json.companies[0].values.net_income).toBe(94e9);
+  });
+});
+
+describe('renderMatrixCsv', () => {
+  it('outputs CSV with header and company rows', () => {
+    const csv = renderMatrixCsv(mockMatrix);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('ticker,company_name,Revenue,Net Income');
+    expect(lines).toHaveLength(3); // header + 2 companies
+  });
+
+  it('includes company data', () => {
+    const csv = renderMatrixCsv(mockMatrix);
+    expect(csv).toContain('AAPL,Apple Inc.,391000000000,94000000000');
+    expect(csv).toContain('MSFT,Microsoft Corp,245000000000,88000000000');
+  });
+
+  it('handles missing values with empty cells', () => {
+    const partial: MatrixResult = {
+      ...mockMatrix,
+      companies: [{
+        company: { cik: '1', ticker: 'TEST', name: 'Test Corp', fiscal_year_end_month: 0 },
+        values: new Map([['revenue', 100e9]]),
+      }],
+    };
+    const csv = renderMatrixCsv(partial);
+    const lines = csv.split('\n');
+    expect(lines[1]).toBe('TEST,Test Corp,100000000000,');
+  });
+
+  it('escapes company names with commas', () => {
+    const withComma: MatrixResult = {
+      ...mockMatrix,
+      companies: [{
+        company: { cik: '1', ticker: 'FOO', name: 'Foo, Bar Inc.', fiscal_year_end_month: 0 },
+        values: new Map([['revenue', 1e9], ['net_income', 1e8]]),
+      }],
+    };
+    const csv = renderMatrixCsv(withComma);
+    expect(csv).toContain('"Foo, Bar Inc."');
   });
 });

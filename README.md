@@ -80,6 +80,7 @@ Computed from the base metrics — no additional API calls:
 - **Company screening** — Find all companies with revenue > $100B using Frames API
 - **Multi-company comparison** — Compare metrics or ratios across AAPL, MSFT, GOOGL
 - **Multi-metric comparison** — Compare revenue, net income, cash flow side-by-side for one company
+- **Financial matrix** — Multiple companies x multiple metrics in one view
 - **Full-text filing search** — Search all EDGAR filings by content ("artificial intelligence", "tariff risk")
 - **Company profile** — SIC code, industry, fiscal year end, filing history
 - **Insider trading** — Form 4 buy/sell activity with bullish/bearish signals
@@ -163,6 +164,15 @@ sec-edgar-nl compare-metrics AAPL revenue net_income operating_cash_flow
 sec-edgar-nl compare-metrics MSFT revenue rd_expense sbc --years 10
 sec-edgar-nl compare-metrics NVDA revenue net_income capex --json
 sec-edgar-nl compare-metrics AAPL revenue net_income --csv
+```
+
+### Financial matrix
+
+```bash
+# Multiple companies x multiple metrics in one view
+sec-edgar-nl matrix AAPL MSFT GOOGL revenue net_income operating_cash_flow
+sec-edgar-nl matrix NVDA AMD INTC revenue rd_expense capex --json
+sec-edgar-nl matrix AAPL MSFT revenue net_income --year 2023 --csv
 ```
 
 ### Financial summary
@@ -250,13 +260,14 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-### Available MCP Tools (14)
+### Available MCP Tools (15)
 
 | Tool | Description |
 |------|-------------|
 | `query_financial_metric` | Fetch a metric for a company |
 | `compare_companies` | Compare a metric across companies |
 | `compare_metrics` | Compare multiple metrics for one company |
+| `financial_matrix` | Multi-company x multi-metric matrix view |
 | `compare_ratios` | Compare a ratio across companies |
 | `screen_companies` | Screen all companies by a metric (Frames API) |
 | `query_financial_ratio` | Compute a derived ratio |
@@ -314,6 +325,7 @@ sec-edgar-nl/
       insider-renderer.ts    # Insider trading output
       screen-renderer.ts     # Company screening output
       multi-metric-renderer.ts # Multi-metric comparison output
+      matrix-renderer.ts     # Financial matrix output
       search-renderer.ts     # Filing search CSV output
 ```
 
@@ -329,7 +341,7 @@ sec-edgar-nl/
 ## Testing
 
 ```bash
-npm test           # Run all tests (221 tests)
+npm test           # Run all tests (233 tests)
 npm run test:watch # Watch mode
 ```
 

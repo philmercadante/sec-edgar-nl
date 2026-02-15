@@ -801,6 +801,162 @@ export async function executeMultiMetricCore(params: MultiMetricParams): Promise
   };
 }
 
+// ── Matrix Execution (Multi-Company x Multi-Metric) ─────────────────
+
+export interface MatrixParams {
+  tickers: string[];
+  metrics: string[];
+  year?: number; // Specific year; default = most recent available
+}
+
+export interface MatrixCompanyData {
+  company: CompanyInfo;
+  values: Map<string, number>; // metric_id -> value
+}
+
+export interface MatrixResult {
+  metrics: Array<{ id: string; display_name: string; unit_type: string }>;
+  fiscal_year: number;
+  companies: MatrixCompanyData[];
+}
+
+export interface MatrixEngineResult {
+  success: boolean;
+  result?: MatrixResult;
+  errors: Array<{ ticker: string; message: string }>;
+  error?: {
+    type: 'metric_not_found' | 'no_data' | 'api_error';
+    message: string;
+    availableMetrics?: Array<{ id: string; display_name: string }>;
+  };
+}
+
+/**
+ * Fetch multiple metrics for multiple companies — a financial matrix.
+ * Returns the most recent year's data for each company/metric combination.
+ */
+export async function executeMatrixCore(params: MatrixParams): Promise<MatrixEngineResult> {
+  const { tickers, metrics: metricQueries, year: targetYear } = params;
+
+  // Resolve all metrics
+  const resolvedMetrics: MetricDefinition[] = [];
+  for (const mq of metricQueries) {
+    const metric = getMetricDefinition(mq) ?? findMetricByName(mq);
+    if (!metric) {
+      return {
+        success: false,
+        errors: [],
+        error: {
+          type: 'metric_not_found',
+          message: `Could not identify metric: "${mq}"`,
+          availableMetrics: METRIC_DEFINITIONS.map(m => ({ id: m.id, display_name: m.display_name })),
+        },
+      };
+    }
+    resolvedMetrics.push(metric);
+  }
+
+  // Resolve all companies and fetch data in parallel
+  const companyResults: Array<{ data: MatrixCompanyData; maxYear: number }> = [];
+  const errors: Array<{ ticker: string; message: string }> = [];
+
+  await Promise.all(tickers.map(async (ticker) => {
+    try {
+      const resolved = await resolveCompanyWithSuggestions(ticker);
+      if (!resolved.company) {
+        errors.push({ ticker, message: `Could not find company: "${ticker}"` });
+        return;
+      }
+
+      const company = resolved.company;
+
+      // Fetch all metrics (first call loads CompanyFacts, rest are cache hits)
+      const metricResults = await Promise.all(
+        resolvedMetrics.map(async (metric) => {
+          try {
+            const result = await fetchMetricData(company, metric, 2);
+            return { metric, dataPoints: result.dataPoints };
+          } catch {
+            return { metric, dataPoints: [] };
+          }
+        })
+      );
+
+      // Find the most recent year across all metrics for this company
+      const allYears = metricResults
+        .flatMap(r => r.dataPoints.map(dp => dp.fiscal_year))
+        .filter(y => y > 0);
+      const maxYear = allYears.length > 0 ? Math.max(...allYears) : 0;
+      const useYear = targetYear ?? maxYear;
+
+      // Extract values for the target year
+      const values = new Map<string, number>();
+      if (useYear > 0) {
+        for (const { metric, dataPoints } of metricResults) {
+          const dp = dataPoints.find(d => d.fiscal_year === useYear);
+          if (dp) values.set(metric.id, dp.value);
+        }
+      }
+
+      companyResults.push({
+        data: {
+          company: {
+            cik: company.cik,
+            ticker: company.ticker,
+            name: company.name,
+            fiscal_year_end_month: 0,
+          },
+          values,
+        },
+        maxYear: useYear,
+      });
+    } catch (err) {
+      errors.push({ ticker, message: err instanceof Error ? err.message : String(err) });
+    }
+  }));
+
+  if (companyResults.length === 0) {
+    return {
+      success: false,
+      errors,
+      error: {
+        type: 'no_data',
+        message: 'No data found for any company.',
+      },
+    };
+  }
+
+  // Sort companies in the same order as input tickers
+  const tickerOrder = new Map(tickers.map((t, i) => [t.toUpperCase(), i]));
+  companyResults.sort((a, b) => {
+    const orderA = tickerOrder.get(a.data.company.ticker.toUpperCase()) ?? 999;
+    const orderB = tickerOrder.get(b.data.company.ticker.toUpperCase()) ?? 999;
+    return orderA - orderB;
+  });
+
+  // Determine the fiscal year (most common max year across companies)
+  const yearCounts = new Map<number, number>();
+  for (const { maxYear } of companyResults) {
+    if (maxYear > 0) yearCounts.set(maxYear, (yearCounts.get(maxYear) ?? 0) + 1);
+  }
+  const resolvedYear = targetYear ??
+    ([...yearCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? new Date().getFullYear() - 1);
+
+  return {
+    success: true,
+    errors,
+    result: {
+      metrics: resolvedMetrics.map(m => ({
+        id: m.id,
+        display_name: m.display_name,
+        unit_type: m.unit_type,
+      })),
+      fiscal_year: resolvedYear,
+      companies: companyResults.map(c => c.data),
+    },
+  };
+}
+
 // ── Screen Execution ──────────────────────────────────────────────────
 
 export interface ScreenParams {

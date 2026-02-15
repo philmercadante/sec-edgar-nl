@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeCompareRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeCompareRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore, executeMatrixCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
@@ -21,6 +21,7 @@ import { renderSummaryTable, renderSummaryJson, renderSummaryCsv, renderSummaryT
 import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/screen-renderer.js';
 import { renderSearchCsv } from './output/search-renderer.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from './output/multi-metric-renderer.js';
+import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from './output/matrix-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -459,6 +460,86 @@ program
       } else {
         console.log('');
         console.log(renderMultiMetricTable(result.result!));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('matrix')
+  .alias('mx')
+  .description('Financial matrix — multiple companies x multiple metrics (e.g., matrix AAPL MSFT GOOGL revenue net_income capex)')
+  .argument('<args...>', 'Tickers and metric IDs (at least 2 tickers and 1 metric)')
+  .option('--year <yyyy>', 'Specific fiscal year (default: most recent)')
+  .option('-j, --json', 'Output as JSON')
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (args: string[], options: { year?: string; json?: boolean; csv?: boolean }) => {
+    try {
+      const year = options.year ? validatePositiveInt(options.year, '--year') : undefined;
+
+      // Separate tickers from metric names
+      // Tickers are uppercase 1-5 letter words; everything else is a metric
+      const tickers: string[] = [];
+      const metricWords: string[] = [];
+
+      for (const arg of args) {
+        if (/^[A-Z]{1,5}(-[A-Z])?$/.test(arg.toUpperCase()) && arg.length <= 6) {
+          tickers.push(arg.toUpperCase());
+        } else {
+          metricWords.push(arg);
+        }
+      }
+
+      if (tickers.length < 2) {
+        console.error(chalk.red('Matrix requires at least 2 company tickers.'));
+        console.error('Usage: sec-edgar-nl matrix AAPL MSFT GOOGL revenue net_income');
+        process.exit(1);
+      }
+
+      if (metricWords.length < 1) {
+        console.error(chalk.red('Matrix requires at least 1 metric.'));
+        console.error('Usage: sec-edgar-nl matrix AAPL MSFT GOOGL revenue net_income');
+        process.exit(1);
+      }
+
+      const result = await executeMatrixCore({
+        tickers,
+        metrics: metricWords,
+        year,
+      });
+
+      if (!result.success) {
+        const err = result.error!;
+        if (err.type === 'metric_not_found') {
+          console.error(chalk.red(err.message));
+          if (err.availableMetrics) {
+            console.error('\nSupported metrics:');
+            for (const m of err.availableMetrics) {
+              console.error(`  ${chalk.cyan(m.id.padEnd(22))} ${m.display_name}`);
+            }
+          }
+        } else {
+          console.error(chalk.red(err.message));
+        }
+        process.exit(1);
+      }
+
+      for (const err of result.errors) {
+        console.error(chalk.yellow(`${err.ticker}: ${err.message}`));
+      }
+
+      if (options.json) {
+        console.log(renderMatrixJson(result.result!));
+      } else if (options.csv) {
+        console.log(renderMatrixCsv(result.result!));
+      } else {
+        console.log('');
+        console.log(renderMatrixTable(result.result!));
         console.log('');
       }
     } catch (err) {
