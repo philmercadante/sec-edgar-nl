@@ -22,6 +22,7 @@ import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/s
 import { renderSearchCsv } from './output/search-renderer.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from './output/multi-metric-renderer.js';
 import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from './output/matrix-renderer.js';
+import { renderTrendTable, renderTrendJson } from './output/trend-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -161,6 +162,62 @@ program
   .option('--year <yyyy>', 'Show a specific fiscal year')
   .action(async (queryParts: string[], options: { json?: boolean; csv?: boolean; years?: string; all?: boolean; year?: string }) => {
     await executeQuery(queryParts.join(' '), options);
+  });
+
+program
+  .command('trend')
+  .alias('t')
+  .description('Trend analysis for a metric — CAGRs, min/max, acceleration signal (e.g., trend AAPL revenue)')
+  .argument('<company>', 'Company ticker or name')
+  .argument('<metric>', 'Financial metric (e.g., revenue, net_income)')
+  .option('-y, --years <n>', 'Number of years of history', '10')
+  .option('-j, --json', 'Output as JSON with computed analytics')
+  .action(async (companyArg: string, metricArg: string, options: { years?: string; json?: boolean }) => {
+    try {
+      const years = validatePositiveInt(options.years || '10', '--years')!;
+
+      const metric = getMetricDefinition(metricArg) ?? findMetricByName(metricArg);
+      if (!metric) {
+        console.error(chalk.red(`Could not identify metric: "${metricArg}"`));
+        console.error('\nSupported metrics:');
+        for (const m of METRIC_DEFINITIONS) {
+          console.error(`  ${chalk.cyan(m.id.padEnd(22))} ${m.display_name}`);
+        }
+        process.exit(1);
+      }
+
+      const result = await executeQueryCore({
+        company: companyArg,
+        metric: metric.id,
+        years,
+      });
+
+      if (!result.success) {
+        const err = result.error!;
+        if (err.type === 'company_ambiguous') {
+          console.error(chalk.red(`Ambiguous company: "${companyArg}". Did you mean:`));
+          for (const s of err.suggestions!) {
+            console.error(`  ${chalk.cyan(s.ticker.padEnd(8))} ${s.name}`);
+          }
+        } else {
+          console.error(chalk.red(err.message));
+        }
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(renderTrendJson(result.result!));
+      } else {
+        console.log('');
+        console.log(renderTrendTable(result.result!));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
   });
 
 program

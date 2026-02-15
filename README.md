@@ -87,6 +87,7 @@ Computed from the base metrics — no additional API calls:
 - **Filing timeline** — List recent SEC filings with direct EDGAR links
 - **Financial summary** — All metrics + derived ratios in one command
 - **Multi-year trend** — See all metrics across 5+ years side-by-side
+- **Trend analysis** — CAGRs, min/max, acceleration/deceleration detection
 - **Period-specific queries** — "AAPL revenue FY2023" or "in 2023"
 - **Full history export** — `--all` flag for complete available history
 - **Annual and quarterly data** — Switch with `quarterly` keyword or `-q` flag
@@ -117,6 +118,14 @@ sec-edgar-nl query "AAPL revenue" --all --csv
 # Output formats
 sec-edgar-nl query "AAPL revenue" --json
 sec-edgar-nl query "AAPL revenue" --csv
+```
+
+### Trend analysis
+
+```bash
+sec-edgar-nl trend AAPL revenue
+sec-edgar-nl trend MSFT net_income --years 15
+sec-edgar-nl trend NVDA revenue --json
 ```
 
 ### Screen companies
@@ -326,6 +335,7 @@ sec-edgar-nl/
       screen-renderer.ts     # Company screening output
       multi-metric-renderer.ts # Multi-metric comparison output
       matrix-renderer.ts     # Financial matrix output
+      trend-renderer.ts      # Trend analysis output
       search-renderer.ts     # Filing search CSV output
 ```
 
@@ -341,7 +351,7 @@ sec-edgar-nl/
 ## Testing
 
 ```bash
-npm test           # Run all tests (233 tests)
+npm test           # Run all tests (245 tests)
 npm run test:watch # Watch mode
 ```
 

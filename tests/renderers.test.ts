@@ -13,6 +13,7 @@ import { padRight, csvEscape } from '../src/output/format-utils.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from '../src/output/multi-metric-renderer.js';
 import { renderSearchCsv } from '../src/output/search-renderer.js';
 import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from '../src/output/matrix-renderer.js';
+import { renderTrendTable, renderTrendJson } from '../src/output/trend-renderer.js';
 import type { RatioResult, ScreenResult, MultiMetricResult, MatrixResult } from '../src/core/query-engine.js';
 import type { QueryResult, MetricDefinition } from '../src/core/types.js';
 
@@ -1164,5 +1165,113 @@ describe('renderMatrixCsv', () => {
     };
     const csv = renderMatrixCsv(withComma);
     expect(csv).toContain('"Foo, Bar Inc."');
+  });
+});
+
+// ── Trend renderer tests ────────────────────────────────────────────
+
+function makeTrendResult(values: [number, number][]): QueryResult {
+  return {
+    company: { cik: '320193', ticker: 'AAPL', name: 'Apple Inc.', fiscal_year_end_month: 0 },
+    metric: mockMetric,
+    data_points: values.map(([fy, val]) => ({
+      metric_id: 'revenue', cik: '320193', company_name: 'Apple Inc.',
+      fiscal_year: fy, fiscal_period: 'FY' as const, period_start: `${fy - 1}-10-01`, period_end: `${fy}-09-30`,
+      value: val, unit: 'USD',
+      source: { accession_number: `accn-${fy}`, filing_date: `${fy + 1}-11-01`, form_type: '10-K', xbrl_concept: 'us-gaap:Revenues' },
+      restated_in: null, is_latest: true, extracted_at: '2025-01-01', checksum: 'test',
+    })),
+    calculations: { yoy_changes: [], cagr: null, cagr_years: 0 },
+    provenance: { metric_concept: 'us-gaap:Revenues', filings_used: [], dedup_strategy: 'most-recently-filed', period_type: 'annual', notes: [] },
+  };
+}
+
+describe('renderTrendTable', () => {
+  const result = makeTrendResult([
+    [2018, 265e9], [2019, 260e9], [2020, 274e9], [2021, 366e9],
+    [2022, 394e9], [2023, 383e9], [2024, 391e9],
+  ]);
+
+  it('includes company name and metric in header', () => {
+    const output = renderTrendTable(result);
+    expect(output).toContain('Apple Inc.');
+    expect(output).toContain('Revenue');
+    expect(output).toContain('Trend Analysis');
+  });
+
+  it('includes sparkline', () => {
+    const output = renderTrendTable(result);
+    expect(output).toContain('Trend:');
+  });
+
+  it('includes multi-period CAGRs', () => {
+    const output = renderTrendTable(result);
+    expect(output).toContain('1-Year CAGR');
+    expect(output).toContain('3-Year CAGR');
+    expect(output).toContain('5-Year CAGR');
+  });
+
+  it('includes statistics (average, high, low)', () => {
+    const output = renderTrendTable(result);
+    expect(output).toContain('Average:');
+    expect(output).toContain('High:');
+    expect(output).toContain('Low:');
+    expect(output).toContain('Current vs Avg:');
+  });
+
+  it('includes growth signal', () => {
+    const output = renderTrendTable(result);
+    // With 7 data points, acceleration analysis should appear
+    expect(output).toContain('Growth Signal');
+  });
+
+  it('includes provenance', () => {
+    const output = renderTrendTable(result);
+    expect(output).toContain('Provenance');
+    expect(output).toContain('us-gaap:Revenues');
+  });
+
+  it('handles empty data', () => {
+    const empty = makeTrendResult([]);
+    const output = renderTrendTable(empty);
+    expect(output).toContain('No data found');
+  });
+});
+
+describe('renderTrendJson', () => {
+  const result = makeTrendResult([
+    [2020, 274e9], [2021, 366e9], [2022, 394e9], [2023, 383e9], [2024, 391e9],
+  ]);
+
+  it('produces valid JSON with analysis section', () => {
+    const json = JSON.parse(renderTrendJson(result));
+    expect(json.company.ticker).toBe('AAPL');
+    expect(json.metric.id).toBe('revenue');
+    expect(json.data).toHaveLength(5);
+    expect(json.analysis).toBeDefined();
+  });
+
+  it('includes multi-period CAGRs', () => {
+    const json = JSON.parse(renderTrendJson(result));
+    expect(json.analysis.cagr['1y']).toBeDefined();
+    expect(json.analysis.cagr['3y']).toBeDefined();
+    expect(typeof json.analysis.cagr['1y']).toBe('number');
+  });
+
+  it('includes statistics', () => {
+    const json = JSON.parse(renderTrendJson(result));
+    expect(json.analysis.statistics.average).toBeGreaterThan(0);
+    expect(json.analysis.statistics.high).toBe(394e9);
+    expect(json.analysis.statistics.low).toBe(274e9);
+  });
+
+  it('includes growth signal', () => {
+    const json = JSON.parse(renderTrendJson(result));
+    expect(['accelerating', 'decelerating', 'stable']).toContain(json.analysis.growth_signal);
+  });
+
+  it('includes provenance', () => {
+    const json = JSON.parse(renderTrendJson(result));
+    expect(json.provenance.metric_concept).toBe('us-gaap:Revenues');
   });
 });
