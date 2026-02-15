@@ -381,6 +381,119 @@ export async function executeRatioCore(params: RatioParams): Promise<RatioEngine
   };
 }
 
+// ── Compare Ratio Execution ─────────────────────────────────────────────
+
+export interface CompareRatioParams {
+  tickers: string[];
+  ratio: string;
+  years?: number;
+}
+
+export interface CompareRatioEngineResult {
+  results: RatioResult[];
+  errors: Array<{ ticker: string; message: string }>;
+  ratio_display_name?: string;
+}
+
+/**
+ * Compare a derived ratio across multiple companies.
+ */
+export async function executeCompareRatioCore(params: CompareRatioParams): Promise<CompareRatioEngineResult> {
+  const { tickers, ratio: ratioQuery, years = 5 } = params;
+
+  const ratio = RATIO_DEFINITIONS.find(r => r.id === ratioQuery) ?? findRatioByName(ratioQuery);
+  if (!ratio) {
+    return {
+      results: [],
+      errors: [{ ticker: '*', message: `Could not identify ratio: "${ratioQuery}". Use "ratios" command to list available ratios.` }],
+    };
+  }
+
+  const numMetric = getMetricDefinition(ratio.numerator);
+  const denMetric = getMetricDefinition(ratio.denominator);
+  if (!numMetric || !denMetric) {
+    return {
+      results: [],
+      errors: [{ ticker: '*', message: `Internal error: metric ${ratio.numerator} or ${ratio.denominator} not found` }],
+    };
+  }
+
+  // Resolve all companies in parallel
+  const resolutions = await Promise.all(
+    tickers.map(t => resolveCompanyWithSuggestions(t))
+  );
+
+  const results: RatioResult[] = [];
+  const errors: Array<{ ticker: string; message: string }> = [];
+
+  for (let i = 0; i < tickers.length; i++) {
+    const resolved = resolutions[i];
+    if (!resolved.company) {
+      errors.push({ ticker: tickers[i], message: `Could not resolve company: ${tickers[i]}` });
+      continue;
+    }
+
+    const company = resolved.company;
+
+    try {
+      const [numResult, denResult] = await Promise.all([
+        fetchMetricData(company, numMetric, years),
+        fetchMetricData(company, denMetric, years),
+      ]);
+
+      if (numResult.dataPoints.length === 0 || denResult.dataPoints.length === 0) {
+        const missing = numResult.dataPoints.length === 0 ? numMetric.display_name : denMetric.display_name;
+        errors.push({ ticker: tickers[i], message: `No ${missing} data for ${company.ticker}` });
+        continue;
+      }
+
+      const numByYear = new Map(numResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
+      const denByYear = new Map(denResult.dataPoints.map(dp => [dp.fiscal_year, dp.value]));
+
+      const allYears = [...new Set([...numByYear.keys(), ...denByYear.keys()])].sort((a, b) => a - b);
+      const dataPoints: RatioDataPoint[] = [];
+
+      for (const year of allYears) {
+        const numVal = numByYear.get(year);
+        const denVal = denByYear.get(year);
+        if (numVal === undefined || denVal === undefined) continue;
+
+        let value: number;
+        if (ratio.operation === 'subtract') {
+          value = numVal - denVal;
+        } else {
+          if (denVal === 0) continue;
+          value = numVal / denVal;
+        }
+
+        dataPoints.push({
+          fiscal_year: year,
+          value: ratio.format === 'percentage' ? Math.round(value * 1000) / 10 : Math.round(value * 100) / 100,
+          numerator_value: numVal,
+          denominator_value: denVal,
+        });
+      }
+
+      if (dataPoints.length === 0) {
+        errors.push({ ticker: tickers[i], message: `No overlapping data to compute ${ratio.display_name}` });
+        continue;
+      }
+
+      results.push({
+        company: { cik: company.cik, ticker: company.ticker, name: company.name, fiscal_year_end_month: 0 },
+        ratio,
+        data_points: dataPoints,
+        numerator_metric: numMetric.display_name,
+        denominator_metric: denMetric.display_name,
+      });
+    } catch (err) {
+      errors.push({ ticker: tickers[i], message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { results, errors, ratio_display_name: ratio.display_name };
+}
+
 // ── Summary Execution ──────────────────────────────────────────────────
 
 export interface SummaryParams {

@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { parseQuery } from './analysis/query-parser.js';
-import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore } from './core/query-engine.js';
+import { executeQueryCore, executeCompareCore, executeRatioCore, executeCompareRatioCore, executeSummaryCore, executeScreenCore } from './core/query-engine.js';
 import { renderTable } from './output/table-renderer.js';
 import { renderJson } from './output/json-renderer.js';
 import { renderComparison, renderComparisonJson } from './output/comparison-renderer.js';
@@ -16,7 +16,7 @@ import { resolveCompanyWithSuggestions } from './core/resolver.js';
 import { getCompanySubmissions, getCompanyFacts, searchFilings } from './core/sec-client.js';
 import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
-import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
+import { renderRatioTable, renderRatioJson, renderRatioCsv, renderCompareRatioTable, renderCompareRatioJson, renderCompareRatioCsv } from './output/ratio-renderer.js';
 import { renderSummaryTable, renderSummaryJson, renderSummaryTrendTable } from './output/summary-renderer.js';
 import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/screen-renderer.js';
 
@@ -334,6 +334,79 @@ program
       console.log(`  ${chalk.cyan(r.id.padEnd(22))} ${r.display_name}`);
       console.log(`  ${''.padEnd(22)} ${chalk.dim(r.description)}`);
       console.log('');
+    }
+  });
+
+program
+  .command('compare-ratio')
+  .alias('cmpr')
+  .description('Compare a financial ratio across multiple companies (e.g., compare-ratio AAPL MSFT GOOGL net_margin)')
+  .argument('<args...>', 'Tickers and ratio name')
+  .option('-j, --json', 'Output as JSON')
+  .option('-c, --csv', 'Output as CSV')
+  .option('-y, --years <n>', 'Number of years', '5')
+  .action(async (args: string[], options: { json?: boolean; csv?: boolean; years?: string }) => {
+    try {
+      const years = validatePositiveInt(options.years || '5', '--years')!;
+
+      // Separate tickers from ratio name
+      const tickers: string[] = [];
+      const ratioWords: string[] = [];
+
+      for (const arg of args) {
+        if (/^[A-Z]{1,5}(-[A-Z])?$/.test(arg.toUpperCase()) && arg.length <= 6) {
+          tickers.push(arg.toUpperCase());
+        } else {
+          ratioWords.push(arg);
+        }
+      }
+
+      if (tickers.length < 2) {
+        console.error(chalk.red('Compare-ratio requires at least 2 company tickers.'));
+        console.error('Usage: sec-edgar-nl compare-ratio AAPL MSFT GOOGL net_margin');
+        process.exit(1);
+      }
+
+      const ratioStr = ratioWords.join(' ');
+      const ratio = RATIO_DEFINITIONS.find(r => r.id === ratioStr) ?? findRatioByName(ratioStr);
+      if (!ratio) {
+        console.error(chalk.red(`Could not identify ratio: "${ratioStr}"`));
+        console.error('\nAvailable ratios:');
+        for (const r of RATIO_DEFINITIONS) {
+          console.error(`  ${chalk.cyan(r.id.padEnd(22))} ${r.display_name}`);
+        }
+        process.exit(1);
+      }
+
+      const { results, errors } = await executeCompareRatioCore({
+        tickers,
+        ratio: ratio.id,
+        years,
+      });
+
+      for (const err of errors) {
+        console.error(chalk.yellow(`${err.ticker}: ${err.message}`));
+      }
+
+      if (results.length === 0) {
+        console.error(chalk.red('No data found for any company.'));
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(renderCompareRatioJson(results));
+      } else if (options.csv) {
+        console.log(renderCompareRatioCsv(results));
+      } else {
+        console.log('');
+        console.log(renderCompareRatioTable(results));
+        console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
     }
   });
 

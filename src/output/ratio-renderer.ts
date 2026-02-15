@@ -74,6 +74,112 @@ export function renderRatioCsv(result: RatioResult): string {
   return lines.join('\n');
 }
 
+// ── Compare Ratio Renderers ────────────────────────────────────────────
+
+export function renderCompareRatioTable(results: RatioResult[]): string {
+  if (results.length === 0) return '';
+  if (results.length === 1) return renderRatioTable(results[0]);
+
+  const lines: string[] = [];
+  const ratio = results[0].ratio;
+
+  const header = `${ratio.display_name} — Company Comparison`;
+  lines.push(chalk.bold(header));
+  lines.push(chalk.dim('='.repeat(header.length)));
+  lines.push(chalk.dim(`  ${ratio.description}`));
+  lines.push(chalk.dim(`  Formula: ${results[0].numerator_metric} ${ratio.operation === 'subtract' ? '−' : '÷'} ${results[0].denominator_metric}`));
+  lines.push('');
+
+  // Collect all fiscal years
+  const allYears = new Set<number>();
+  for (const r of results) {
+    for (const dp of r.data_points) {
+      allYears.add(dp.fiscal_year);
+    }
+  }
+  const years = Array.from(allYears).sort((a, b) => a - b);
+
+  const fyColWidth = 10;
+  const companyColWidth = 14;
+
+  // Table header
+  let headerRow = `  ${padRight('FY', fyColWidth)}`;
+  for (const r of results) {
+    headerRow += padRight(r.company.ticker || r.company.name.slice(0, 12), companyColWidth);
+  }
+  lines.push(chalk.underline(headerRow));
+
+  // Data rows
+  for (const year of years) {
+    let row = `  ${padRight(String(year), fyColWidth)}`;
+    for (const r of results) {
+      const dp = r.data_points.find(d => d.fiscal_year === year);
+      const val = dp ? formatRatioValue(dp.value, ratio.format) : chalk.dim('--');
+      row += padRight(val, companyColWidth);
+    }
+    lines.push(row);
+  }
+
+  // Trend row
+  lines.push('');
+  let trendRow = `  ${padRight('Trend', fyColWidth)}`;
+  for (const r of results) {
+    if (r.data_points.length >= 2) {
+      const first = r.data_points[0].value;
+      const last = r.data_points[r.data_points.length - 1].value;
+      const diff = last - first;
+      const arrow = diff > 0 ? chalk.green(`+${formatDelta(diff, ratio.format)} ↑`)
+        : diff < 0 ? chalk.red(`${formatDelta(diff, ratio.format)} ↓`)
+        : chalk.dim('Flat →');
+      trendRow += padRight(arrow, companyColWidth);
+    } else {
+      trendRow += padRight(chalk.dim('--'), companyColWidth);
+    }
+  }
+  lines.push(chalk.bold(trendRow));
+
+  return lines.join('\n');
+}
+
+export function renderCompareRatioJson(results: RatioResult[]): string {
+  return JSON.stringify({
+    comparison: results.map(r => ({
+      company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
+      ratio: { id: r.ratio.id, display_name: r.ratio.display_name },
+      data: r.data_points.map(dp => ({
+        fiscal_year: dp.fiscal_year,
+        value: dp.value,
+      })),
+    })),
+  }, null, 2);
+}
+
+export function renderCompareRatioCsv(results: RatioResult[]): string {
+  if (results.length === 0) return '';
+  const ratio = results[0].ratio;
+
+  // Collect all years
+  const allYears = new Set<number>();
+  for (const r of results) {
+    for (const dp of r.data_points) allYears.add(dp.fiscal_year);
+  }
+  const years = Array.from(allYears).sort((a, b) => a - b);
+
+  const tickers = results.map(r => r.company.ticker || r.company.name);
+  const lines: string[] = [];
+  lines.push(['FY', ...tickers].join(','));
+
+  for (const year of years) {
+    const vals = results.map(r => {
+      const dp = r.data_points.find(d => d.fiscal_year === year);
+      return dp ? dp.value.toString() : '';
+    });
+    lines.push([String(year), ...vals].join(','));
+  }
+
+  return lines.join('\n');
+}
+
 function formatRatioValue(value: number, format: string): string {
   switch (format) {
     case 'percentage':

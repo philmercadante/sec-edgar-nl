@@ -288,6 +288,41 @@ server.tool(
 );
 
 server.tool(
+  'compare_ratios',
+  'Compare a derived financial ratio across multiple companies. Compares ratios like net margin, ROE, or debt-to-equity across 2+ companies side-by-side.',
+  {
+    tickers: z.array(z.string()).min(2).max(10).describe('Array of ticker symbols (e.g., ["AAPL", "MSFT", "GOOGL"])'),
+    ratio: z.enum(RATIO_IDS).describe('Financial ratio to compare'),
+    years: z.number().min(1).max(20).optional().default(5).describe('Number of fiscal years (default 5)'),
+  },
+  async ({ tickers, ratio, years }) => {
+    const { executeCompareRatioCore } = await import('./core/query-engine.js');
+    const { results, errors } = await executeCompareRatioCore({ tickers, ratio, years });
+
+    const output: Record<string, unknown> = {};
+
+    if (errors.length > 0) {
+      output.warnings = errors.map(e => `${e.ticker}: ${e.message}`);
+    }
+
+    if (results.length === 0) {
+      return { content: [{ type: 'text', text: `No data found. ${errors.map(e => e.message).join('; ')}` }], isError: true };
+    }
+
+    output.comparison = results.map(r => ({
+      company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
+      ratio: { id: r.ratio.id, display_name: r.ratio.display_name },
+      data: r.data_points.map(dp => ({
+        fiscal_year: dp.fiscal_year,
+        value: dp.value,
+      })),
+    }));
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
   'list_company_filings',
   'List recent SEC filings for a company with dates, form types, descriptions, and direct EDGAR links.',
   {
