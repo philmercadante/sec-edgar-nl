@@ -22,7 +22,7 @@ import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/s
 import { renderSearchCsv } from './output/search-renderer.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from './output/multi-metric-renderer.js';
 import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from './output/matrix-renderer.js';
-import { renderTrendTable, renderTrendJson } from './output/trend-renderer.js';
+import { renderTrendTable, renderTrendJson, renderTrendCsv } from './output/trend-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -172,7 +172,8 @@ program
   .argument('<metric>', 'Financial metric (e.g., revenue, net_income)')
   .option('-y, --years <n>', 'Number of years of history', '10')
   .option('-j, --json', 'Output as JSON with computed analytics')
-  .action(async (companyArg: string, metricArg: string, options: { years?: string; json?: boolean }) => {
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, metricArg: string, options: { years?: string; json?: boolean; csv?: boolean }) => {
     try {
       const years = validatePositiveInt(options.years || '10', '--years')!;
 
@@ -207,6 +208,8 @@ program
 
       if (options.json) {
         console.log(renderTrendJson(result.result!));
+      } else if (options.csv) {
+        console.log(renderTrendCsv(result.result!));
       } else {
         console.log('');
         console.log(renderTrendTable(result.result!));

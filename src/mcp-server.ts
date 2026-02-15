@@ -6,13 +6,14 @@
  * Exposes SEC EDGAR financial data as MCP tools that Claude Desktop,
  * Claude Code, and other MCP clients can use directly.
  *
- * Tools (15):
+ * Tools (16):
  *   - query_financial_metric: fetch a metric for one company
  *   - compare_companies: compare a metric across multiple companies
  *   - compare_metrics: compare multiple metrics for one company
  *   - financial_matrix: multi-company x multi-metric matrix view
  *   - compare_ratios: compare a ratio across multiple companies
  *   - query_financial_ratio: compute a derived financial ratio
+ *   - trend_analysis: growth trend with CAGRs and acceleration signal
  *   - company_financial_summary: all metrics for one company
  *   - screen_companies: screen all companies by a metric
  *   - query_insider_trading: get insider buy/sell activity
@@ -36,6 +37,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { executeQueryCore, executeCompareCore, executeRatioCore, executeSummaryCore, executeScreenCore, executeMultiMetricCore, executeMatrixCore } from './core/query-engine.js';
+import { calculateCAGR, computeGrowthSignal } from './processing/calculations.js';
 import { METRIC_DEFINITIONS } from './processing/metric-definitions.js';
 import { RATIO_DEFINITIONS } from './processing/ratio-definitions.js';
 import { getCacheStats } from './core/cache.js';
@@ -639,6 +641,77 @@ server.tool(
       metrics: r.metrics,
       companies,
       warnings: result.errors.length > 0 ? result.errors.map(e => `${e.ticker}: ${e.message}`) : undefined,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
+  'trend_analysis',
+  'Analyze the growth trend of a financial metric over time. Returns multi-period CAGRs (1Y/3Y/5Y/10Y), min/max values, and a growth acceleration/deceleration signal. Ideal for understanding if a company\'s growth is accelerating, decelerating, or stable.',
+  {
+    company: z.string().describe('Company ticker symbol (e.g., AAPL) or name'),
+    metric: z.enum(METRIC_IDS).describe('Financial metric to analyze'),
+    years: z.number().min(3).max(20).optional().default(10).describe('Number of years of history (default 10)'),
+  },
+  async ({ company, metric, years }) => {
+    const result = await executeQueryCore({ company, metric, years });
+
+    if (!result.success) {
+      let errorText = result.error!.message;
+      if (result.error!.suggestions?.length) {
+        errorText += '\n\nDid you mean:\n' +
+          result.error!.suggestions.map(s => `  ${s.ticker} — ${s.name}`).join('\n');
+      }
+      return { content: [{ type: 'text', text: errorText }], isError: true };
+    }
+
+    const r = result.result!;
+    const values = r.data_points.map(dp => dp.value);
+    const n = values.length;
+
+    // Compute multi-period CAGRs
+    const cagrs: Record<string, number | null> = {};
+    for (const lookback of [1, 3, 5, 10]) {
+      if (n > lookback) {
+        cagrs[`${lookback}y`] = calculateCAGR(values[n - 1 - lookback], values[n - 1], lookback);
+      }
+    }
+
+    // Statistics
+    const avg = n > 0 ? values.reduce((a, b) => a + b, 0) / n : null;
+    const maxVal = n > 0 ? Math.max(...values) : null;
+    const minVal = n > 0 ? Math.min(...values) : null;
+    const maxYear = maxVal !== null ? r.data_points[values.indexOf(maxVal)].fiscal_year : null;
+    const minYear = minVal !== null ? r.data_points[values.indexOf(minVal)].fiscal_year : null;
+
+    // Growth signal
+    const growthResult = computeGrowthSignal(values);
+
+    const output = {
+      company: { cik: r.company.cik, ticker: r.company.ticker, name: r.company.name },
+      metric: { id: r.metric.id, display_name: r.metric.display_name },
+      data: r.data_points.map(dp => ({
+        fiscal_year: dp.fiscal_year,
+        value: dp.value,
+      })),
+      analysis: {
+        cagr: cagrs,
+        statistics: {
+          average: avg,
+          high: maxVal,
+          high_year: maxYear,
+          low: minVal,
+          low_year: minYear,
+        },
+        growth_signal: growthResult ? {
+          signal: growthResult.signal,
+          first_half_avg_growth: Math.round(growthResult.firstHalfAvg * 10) / 10,
+          second_half_avg_growth: Math.round(growthResult.secondHalfAvg * 10) / 10,
+        } : null,
+      },
+      provenance: r.provenance,
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
