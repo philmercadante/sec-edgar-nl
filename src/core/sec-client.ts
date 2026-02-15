@@ -235,6 +235,112 @@ export async function getFrameData(
   }
 }
 
+/** Shape of the EFTS full-text search API response */
+export interface SearchResult {
+  total: number;
+  hits: SearchHit[];
+}
+
+export interface SearchHit {
+  score: number;
+  display_name: string;
+  cik: string;
+  form_type: string;
+  filing_date: string;
+  accession_number: string;
+  period_ending: string;
+  location: string;
+}
+
+/**
+ * Search SEC EDGAR filings using the full-text search (EFTS) API.
+ * Returns filings that match a text query.
+ */
+export async function searchFilings(params: {
+  query: string;
+  forms?: string[];
+  startDate?: string;
+  endDate?: string;
+  company?: string;
+  limit?: number;
+}): Promise<SearchResult> {
+  const { query, forms, startDate, endDate, company, limit = 20 } = params;
+
+  const url = new URL('https://efts.sec.gov/LATEST/search-index');
+  url.searchParams.set('q', query);
+
+  if (forms && forms.length > 0) {
+    url.searchParams.set('forms', forms.join(','));
+  }
+
+  if (startDate || endDate) {
+    url.searchParams.set('dateRange', 'custom');
+    // EFTS requires both startdt and enddt when dateRange=custom
+    url.searchParams.set('startdt', startDate || '2001-01-01');
+    url.searchParams.set('enddt', endDate || new Date().toISOString().slice(0, 10));
+  }
+
+  // Note: EFTS doesn't have a direct CIK filter in the search-index endpoint,
+  // but we can add the company name to the query to narrow results.
+
+  const fullUrl = url.toString();
+
+  // Use fetch directly with rate limiting (EFTS is on a different domain)
+  await rateLimiter.acquire();
+
+  const response = await fetch(fullUrl, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new SecApiError(`EFTS search failed: ${response.status}`, response.status, fullUrl);
+  }
+
+  const body = await response.text();
+  let data: {
+    hits: {
+      total: { value: number };
+      hits: Array<{
+        _score: number;
+        _source: {
+          display_names: string[];
+          ciks: string[];
+          form: string;
+          file_date: string;
+          adsh: string;
+          period_ending: string;
+          biz_locations: string[];
+        };
+      }>;
+    };
+  };
+
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw new DataParseError('Failed to parse EFTS search results', fullUrl);
+  }
+
+  const hits = data.hits.hits.slice(0, limit).map(h => ({
+    score: h._score,
+    display_name: h._source.display_names?.[0] || 'Unknown',
+    cik: h._source.ciks?.[0]?.replace(/^0+/, '') || '',
+    form_type: h._source.form || '',
+    filing_date: h._source.file_date || '',
+    accession_number: h._source.adsh || '',
+    period_ending: h._source.period_ending || '',
+    location: h._source.biz_locations?.[0] || '',
+  }));
+
+  return {
+    total: data.hits.total.value,
+    hits,
+  };
+}
+
 /**
  * Fetch a specific filing document (XML, HTML, etc.)
  * Used for Form 4 XML documents and 13F information tables.

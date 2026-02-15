@@ -410,6 +410,44 @@ server.tool(
 );
 
 server.tool(
+  'search_filings',
+  'Search SEC EDGAR filings by text content using full-text search. Find filings mentioning specific terms like "artificial intelligence", "supply chain risk", "CEO departure", etc.',
+  {
+    query: z.string().describe('Search query (e.g., "artificial intelligence", "tariff impact")'),
+    forms: z.array(z.string()).optional().describe('Filter by form types (e.g., ["10-K", "8-K"])'),
+    start_date: z.string().optional().describe('Start date filter (YYYY-MM-DD)'),
+    end_date: z.string().optional().describe('End date filter (YYYY-MM-DD)'),
+    limit: z.number().min(1).max(100).optional().default(20).describe('Max results (default 20)'),
+  },
+  async ({ query, forms, start_date, end_date, limit }) => {
+    const { searchFilings } = await import('./core/sec-client.js');
+    const result = await searchFilings({
+      query,
+      forms,
+      startDate: start_date,
+      endDate: end_date,
+      limit,
+    });
+
+    const output = {
+      query,
+      total_results: result.total,
+      results: result.hits.map(h => ({
+        company: h.display_name,
+        cik: h.cik,
+        form_type: h.form_type,
+        filing_date: h.filing_date,
+        period_ending: h.period_ending,
+        accession_number: h.accession_number,
+        location: h.location,
+      })),
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+  }
+);
+
+server.tool(
   'screen_companies',
   'Screen all public companies by a financial metric using SEC EDGAR Frames API. Returns companies ranked by the metric value for a given calendar year. Supports filtering by min/max value.',
   {

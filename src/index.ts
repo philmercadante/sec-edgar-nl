@@ -13,7 +13,7 @@ import { METRIC_DEFINITIONS, findMetricByName, getMetricDefinition } from './pro
 import { fetchInsiderActivity } from './processing/insider-processor.js';
 import { renderInsiderTable, renderInsiderJson } from './output/insider-renderer.js';
 import { resolveCompanyWithSuggestions } from './core/resolver.js';
-import { getCompanySubmissions, getCompanyFacts } from './core/sec-client.js';
+import { getCompanySubmissions, getCompanyFacts, searchFilings } from './core/sec-client.js';
 import { renderFilingTable, renderFilingJson, type Filing, type FilingListResult } from './output/filing-renderer.js';
 import { RATIO_DEFINITIONS, findRatioByName } from './processing/ratio-definitions.js';
 import { renderRatioTable, renderRatioJson, renderRatioCsv } from './output/ratio-renderer.js';
@@ -667,6 +667,88 @@ program
         console.log('');
         console.log(renderScreenTable(result.result!));
         console.log('');
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    } finally {
+      closeCache();
+    }
+  });
+
+program
+  .command('search')
+  .description('Search SEC EDGAR filings by text content (full-text search)')
+  .argument('<query...>', 'Search query (e.g., "artificial intelligence" or "supply chain risk")')
+  .option('-f, --form <types>', 'Filter by form types, comma-separated (e.g., 10-K,10-Q,8-K)')
+  .option('--since <date>', 'Start date (YYYY-MM-DD)')
+  .option('--until <date>', 'End date (YYYY-MM-DD)')
+  .option('-n, --limit <n>', 'Number of results', '20')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (queryParts: string[], options: { form?: string; since?: string; until?: string; limit?: string; json?: boolean }) => {
+    try {
+      const limit = validatePositiveInt(options.limit || '20', '--limit')!;
+      const forms = options.form ? options.form.split(',').map(f => f.trim()) : undefined;
+
+      const result = await searchFilings({
+        query: queryParts.join(' '),
+        forms,
+        startDate: options.since,
+        endDate: options.until,
+        limit,
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          query: queryParts.join(' '),
+          total_results: result.total,
+          results: result.hits.map(h => ({
+            company: h.display_name,
+            cik: h.cik,
+            form_type: h.form_type,
+            filing_date: h.filing_date,
+            period_ending: h.period_ending,
+            accession_number: h.accession_number,
+            location: h.location,
+          })),
+        }, null, 2));
+      } else {
+        const header = `Search: "${queryParts.join(' ')}" — ${result.total.toLocaleString()} results`;
+        console.log('');
+        console.log(chalk.bold(header));
+        console.log(chalk.dim('='.repeat(header.length)));
+        if (forms) console.log(chalk.dim(`  Forms: ${forms.join(', ')}`));
+        if (options.since || options.until) {
+          console.log(chalk.dim(`  Date range: ${options.since || 'earliest'} to ${options.until || 'today'}`));
+        }
+        console.log('');
+
+        if (result.hits.length === 0) {
+          console.log(chalk.dim('  No filings found matching your query.'));
+        }
+
+        for (const h of result.hits) {
+          const formColor = h.form_type.startsWith('10-K') ? chalk.green
+            : h.form_type.startsWith('10-Q') ? chalk.cyan
+            : h.form_type.startsWith('8-K') ? chalk.yellow
+            : chalk.white;
+
+          const name = h.display_name.length > 60
+            ? h.display_name.slice(0, 57) + '...'
+            : h.display_name;
+
+          const cik = h.cik.padStart(10, '0');
+          const accNoDashes = h.accession_number.replace(/-/g, '');
+
+          console.log(`  ${formColor(h.form_type.padEnd(10))} ${h.filing_date}  ${name}`);
+          console.log(chalk.dim(`    ${h.location ? h.location + ' | ' : ''}https://www.sec.gov/Archives/edgar/data/${cik}/${accNoDashes}/`));
+        }
+
+        console.log('');
+        if (result.total > limit) {
+          console.log(chalk.dim(`  Showing ${result.hits.length} of ${result.total.toLocaleString()} results. Use --limit to see more.`));
+          console.log('');
+        }
       }
     } catch (err) {
       console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
