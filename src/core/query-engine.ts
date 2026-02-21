@@ -683,6 +683,7 @@ export interface MultiMetricResult {
   metrics: Array<{ id: string; display_name: string; unit_type: string }>;
   years: number[];
   data: Map<string, Map<number, number>>; // metric_id -> fiscal_year -> value
+  warnings: string[];
 }
 
 export interface MultiMetricEngineResult {
@@ -745,12 +746,14 @@ export async function executeMultiMetricCore(params: MultiMetricParams): Promise
   const company = resolved.company;
 
   // Fetch all metrics (first call hits SEC API, rest are cache hits)
+  const warnings: string[] = [];
   const metricResults = await Promise.all(
     resolvedMetrics.map(async (metric) => {
       try {
         const result = await fetchMetricData(company, metric, years);
         return { metric, dataPoints: result.dataPoints };
-      } catch {
+      } catch (err) {
+        warnings.push(`${metric.display_name}: ${err instanceof Error ? err.message : 'fetch failed'}`);
         return { metric, dataPoints: [] };
       }
     })
@@ -797,6 +800,7 @@ export async function executeMultiMetricCore(params: MultiMetricParams): Promise
       })),
       years: [...allYears].sort((a, b) => a - b),
       data,
+      warnings,
     },
   };
 }

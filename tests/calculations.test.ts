@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateGrowth } from '../src/processing/calculations.js';
+import { calculateGrowth, calculateCAGR, calculateYoYChangePct, computeGrowthSignal } from '../src/processing/calculations.js';
 import type { DataPoint } from '../src/core/types.js';
 
 function makeDataPoint(fiscal_year: number, value: number): DataPoint {
@@ -135,5 +135,113 @@ describe('calculateGrowth', () => {
     ];
     const result = calculateGrowth(data);
     expect(result.cagr).toBeNull();
+  });
+});
+
+describe('calculateCAGR', () => {
+  it('computes CAGR correctly for positive values', () => {
+    // $100 to $200 over 4 years ≈ 18.9%
+    expect(calculateCAGR(100, 200, 4)).toBe(18.9);
+  });
+
+  it('returns null for zero start value', () => {
+    expect(calculateCAGR(0, 200, 4)).toBeNull();
+  });
+
+  it('returns null for negative values', () => {
+    expect(calculateCAGR(-100, 200, 4)).toBeNull();
+    expect(calculateCAGR(100, -200, 4)).toBeNull();
+  });
+
+  it('returns null for zero or negative years', () => {
+    expect(calculateCAGR(100, 200, 0)).toBeNull();
+    expect(calculateCAGR(100, 200, -1)).toBeNull();
+  });
+
+  it('returns 0 for unchanged values', () => {
+    expect(calculateCAGR(100, 100, 5)).toBe(0);
+  });
+
+  it('computes 1-year CAGR as simple growth rate', () => {
+    // $100 to $150 over 1 year = 50%
+    expect(calculateCAGR(100, 150, 1)).toBe(50);
+  });
+
+  it('returns null for Infinity result', () => {
+    expect(calculateCAGR(1e-300, 1e300, 1)).toBeNull();
+  });
+});
+
+describe('calculateYoYChangePct', () => {
+  it('computes positive YoY change', () => {
+    expect(calculateYoYChangePct(150, 100)).toBe(50);
+  });
+
+  it('computes negative YoY change', () => {
+    expect(calculateYoYChangePct(75, 100)).toBe(-25);
+  });
+
+  it('returns null for zero prior value', () => {
+    expect(calculateYoYChangePct(100, 0)).toBeNull();
+  });
+
+  it('returns null for sign flip (positive to negative)', () => {
+    expect(calculateYoYChangePct(-50, 100)).toBeNull();
+  });
+
+  it('returns null for sign flip (negative to positive)', () => {
+    expect(calculateYoYChangePct(50, -100)).toBeNull();
+  });
+
+  it('handles both negative values correctly', () => {
+    // -100 to -50 = 50% improvement
+    expect(calculateYoYChangePct(-50, -100)).toBe(50);
+  });
+
+  it('returns 0 for unchanged values', () => {
+    expect(calculateYoYChangePct(100, 100)).toBe(0);
+  });
+});
+
+describe('computeGrowthSignal', () => {
+  it('returns null for fewer than 4 data points', () => {
+    expect(computeGrowthSignal([100, 110, 120])).toBeNull();
+  });
+
+  it('detects accelerating growth', () => {
+    // First half: 10% growth, second half: 50% growth
+    const values = [100, 110, 121, 182, 273];
+    const result = computeGrowthSignal(values);
+    expect(result).not.toBeNull();
+    expect(result!.signal).toBe('accelerating');
+  });
+
+  it('detects decelerating growth', () => {
+    // First half: 50% growth, second half: 5% growth
+    const values = [100, 150, 225, 236, 248];
+    const result = computeGrowthSignal(values);
+    expect(result).not.toBeNull();
+    expect(result!.signal).toBe('decelerating');
+  });
+
+  it('detects stable growth', () => {
+    // Consistent ~10% growth
+    const values = [100, 110, 121, 133, 146];
+    const result = computeGrowthSignal(values);
+    expect(result).not.toBeNull();
+    expect(result!.signal).toBe('stable');
+  });
+
+  it('returns null when no valid growth rates (negative/zero values)', () => {
+    const values = [-100, -200, -300, -400];
+    expect(computeGrowthSignal(values)).toBeNull();
+  });
+
+  it('provides firstHalfAvg and secondHalfAvg', () => {
+    const values = [100, 110, 121, 133, 146];
+    const result = computeGrowthSignal(values);
+    expect(result).not.toBeNull();
+    expect(result!.firstHalfAvg).toBeCloseTo(10, 0);
+    expect(result!.secondHalfAvg).toBeCloseTo(10, 0);
   });
 });

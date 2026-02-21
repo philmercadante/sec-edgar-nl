@@ -13,7 +13,7 @@ import { padRight, csvEscape } from '../src/output/format-utils.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from '../src/output/multi-metric-renderer.js';
 import { renderSearchCsv } from '../src/output/search-renderer.js';
 import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from '../src/output/matrix-renderer.js';
-import { renderTrendTable, renderTrendJson } from '../src/output/trend-renderer.js';
+import { renderTrendTable, renderTrendJson, renderTrendCsv } from '../src/output/trend-renderer.js';
 import type { RatioResult, ScreenResult, MultiMetricResult, MatrixResult } from '../src/core/query-engine.js';
 import type { QueryResult, MetricDefinition } from '../src/core/types.js';
 
@@ -1273,5 +1273,36 @@ describe('renderTrendJson', () => {
   it('includes provenance', () => {
     const json = JSON.parse(renderTrendJson(result));
     expect(json.provenance.metric_concept).toBe('us-gaap:Revenues');
+  });
+});
+
+describe('renderTrendCsv', () => {
+  const result = makeTrendResult([
+    [2020, 274e9], [2021, 366e9], [2022, 394e9], [2023, 383e9], [2024, 391e9],
+  ]);
+
+  it('has correct CSV header', () => {
+    const csv = renderTrendCsv(result);
+    const lines = csv.split('\n');
+    expect(lines[0]).toBe('fiscal_year,value,yoy_change_pct');
+  });
+
+  it('has one row per data point', () => {
+    const csv = renderTrendCsv(result);
+    const lines = csv.split('\n');
+    expect(lines.length).toBe(6); // header + 5 data rows
+  });
+
+  it('first row has empty YoY', () => {
+    const csv = renderTrendCsv(result);
+    const lines = csv.split('\n');
+    expect(lines[1]).toBe('2020,274000000000,');
+  });
+
+  it('subsequent rows have YoY change', () => {
+    const csv = renderTrendCsv(result);
+    const lines = csv.split('\n');
+    // 2021: 366B from 274B = 33.6%
+    expect(lines[2]).toMatch(/^2021,366000000000,33\.6$/);
   });
 });

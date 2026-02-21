@@ -22,7 +22,7 @@ import { renderScreenTable, renderScreenJson, renderScreenCsv } from './output/s
 import { renderSearchCsv } from './output/search-renderer.js';
 import { renderMultiMetricTable, renderMultiMetricJson, renderMultiMetricCsv } from './output/multi-metric-renderer.js';
 import { renderMatrixTable, renderMatrixJson, renderMatrixCsv } from './output/matrix-renderer.js';
-import { renderTrendTable, renderTrendJson } from './output/trend-renderer.js';
+import { renderTrendTable, renderTrendJson, renderTrendCsv } from './output/trend-renderer.js';
 
 function formatWatchValue(value: number): string {
   const abs = Math.abs(value);
@@ -172,7 +172,8 @@ program
   .argument('<metric>', 'Financial metric (e.g., revenue, net_income)')
   .option('-y, --years <n>', 'Number of years of history', '10')
   .option('-j, --json', 'Output as JSON with computed analytics')
-  .action(async (companyArg: string, metricArg: string, options: { years?: string; json?: boolean }) => {
+  .option('-c, --csv', 'Output as CSV')
+  .action(async (companyArg: string, metricArg: string, options: { years?: string; json?: boolean; csv?: boolean }) => {
     try {
       const years = validatePositiveInt(options.years || '10', '--years')!;
 
@@ -207,6 +208,8 @@ program
 
       if (options.json) {
         console.log(renderTrendJson(result.result!));
+      } else if (options.csv) {
+        console.log(renderTrendCsv(result.result!));
       } else {
         console.log('');
         console.log(renderTrendTable(result.result!));
@@ -508,6 +511,10 @@ program
           console.error(chalk.red(err.message));
         }
         process.exit(1);
+      }
+
+      for (const w of result.result!.warnings) {
+        console.error(chalk.yellow(`Warning: ${w}`));
       }
 
       if (options.json) {
@@ -1246,6 +1253,90 @@ program
     } finally {
       closeCache();
     }
+  });
+
+program
+  .command('quickstart')
+  .alias('examples')
+  .description('Show usage examples for every command')
+  .action(() => {
+    console.log(`
+${chalk.bold('sec-edgar-nl — Quick Reference')}
+${'='.repeat(40)}
+
+${chalk.bold.cyan('QUERY')} — Ask a question in plain English
+  sec-edgar-nl query "Apple revenue 5 years"
+  sec-edgar-nl query "MSFT net income" --years 10
+  sec-edgar-nl query "Tesla EPS" --all
+  sec-edgar-nl query "AAPL revenue" --year 2023
+  sec-edgar-nl query "Amazon cash flow quarterly"
+
+${chalk.bold.cyan('SUMMARY')} — All 23 metrics + ratios for one company
+  sec-edgar-nl summary AAPL
+  sec-edgar-nl summary MSFT --year 2023
+  sec-edgar-nl summary NVDA --years 5
+
+${chalk.bold.cyan('TREND')} — Growth analysis with CAGRs and signals
+  sec-edgar-nl trend AAPL revenue
+  sec-edgar-nl trend MSFT net_income --years 15
+
+${chalk.bold.cyan('COMPARE')} — Same metric across companies
+  sec-edgar-nl compare AAPL MSFT GOOGL revenue
+  sec-edgar-nl compare NVDA AMD INTC rd_expense --years 10
+
+${chalk.bold.cyan('COMPARE-METRICS')} — Multiple metrics for one company
+  sec-edgar-nl compare-metrics AAPL revenue net_income capex
+  sec-edgar-nl compare-metrics NVDA revenue rd_expense sbc
+
+${chalk.bold.cyan('MATRIX')} — Multi-company x multi-metric grid
+  sec-edgar-nl matrix AAPL MSFT GOOGL revenue net_income capex
+  sec-edgar-nl matrix AAPL NVDA total_debt total_equity --year 2024
+
+${chalk.bold.cyan('RATIO')} — Derived financial ratios
+  sec-edgar-nl ratio AAPL net_margin
+  sec-edgar-nl ratio MSFT return_on_equity --years 10
+
+${chalk.bold.cyan('COMPARE-RATIO')} — Compare a ratio across companies
+  sec-edgar-nl compare-ratio AAPL MSFT GOOGL debt_to_equity
+
+${chalk.bold.cyan('SCREEN')} — Rank all public companies by a metric
+  sec-edgar-nl screen revenue --year 2024 --limit 20
+  sec-edgar-nl screen total_assets --min 100B
+
+${chalk.bold.cyan('INSIDERS')} — Form 4 insider trading activity
+  sec-edgar-nl insiders AAPL
+  sec-edgar-nl insiders NVDA --days 180
+
+${chalk.bold.cyan('FILINGS')} — Browse SEC filing history
+  sec-edgar-nl filings AAPL
+  sec-edgar-nl filings TSLA --form 10-K --limit 5
+
+${chalk.bold.cyan('SEARCH')} — Full-text search across all EDGAR filings
+  sec-edgar-nl search "artificial intelligence"
+  sec-edgar-nl search "tariff impact" --form 10-K,8-K --since 2024-01-01
+
+${chalk.bold.cyan('INFO')} — Company profile
+  sec-edgar-nl info AAPL
+
+${chalk.bold.cyan('CONCEPTS')} — Explore raw XBRL data
+  sec-edgar-nl concepts AAPL
+  sec-edgar-nl concepts AAPL --search inventory
+
+${chalk.bold.cyan('WATCH')} — Monitor metrics for changes
+  sec-edgar-nl watch add AAPL revenue
+  sec-edgar-nl watch list
+  sec-edgar-nl watch check
+
+${chalk.bold.cyan('REFERENCE')}
+  sec-edgar-nl metrics          List all 23 metrics
+  sec-edgar-nl ratios           List all 14 ratios
+  sec-edgar-nl cache --stats    Cache info
+  sec-edgar-nl cache --clear    Reset cache
+
+${chalk.bold.cyan('OUTPUT FORMATS')} — All data commands support:
+  --json (-j)    JSON output
+  --csv  (-c)    CSV output (pipe to file with > data.csv)
+`);
   });
 
 // If no subcommand matches, treat all args as a query
